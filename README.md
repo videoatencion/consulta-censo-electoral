@@ -24,12 +24,11 @@ Solicitudes por segundo:               624
 CPUs utilizadas:                       0.4
 ```
 
-
 Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millones de solicitudes por hora con menos de 1 CPU y 128 MB de RAM.
 
 ## Empezando
 
-1) Descargue el censo del INE.
+1) Descarga el censo del INE.
 
   - En "Generar Fichero" deje todas las opciones en "Todos" y Ámbito Censal en "CER y CERE".
 ![CER y CERE](docs/images/image001.png)
@@ -42,16 +41,15 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
 ```
   - Coloque ese archivo en una carpeta sin más archivos. La extensión debe de ser .txt o .csv.
 
-2) Construya su docker:
+2) Construye el docker:
 
-    docker build . -t censo:latest
-3) Ejecute el servicio:
+    *docker build . -t censo:latest*
+    
+3) Ejecuta el servicio:
 
-    docker run -e TOKEN=12345 -v /ruta/al/directorio/del/censo:/data -p 8080:8080 -d censo:latest
+    *docker run -e TOKEN=12345 -v /ruta/al/directorio/del/censo:/data -p 8080:8080 -d censo:latest*
 
-4) Pruebe su servicio
-
-  curl -H 'Authorization: 12345' http://127.0.0.1:8080/consulta/0000000X/25121972
+4) Prueba el servicio: *curl -H 'Authorization: 12345' http://127.0.0.1:8080/consulta/0000000X/25121972*
 
 ```json
 {"poblacion":"RUBÍ","distrito":"01","seccion":"001","mesa":"A","colele":"ESCOLA RAMON LLULL","dircol":"AV FLORS 43","errorMessage":""}
@@ -61,11 +59,11 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
 
 ## Ejecutando en producción
 
-También se proporciona un archivo docker-compose.yml para construir e iniciar el servicio. Recuerde cambiar el TOKEN, la ruta a la carpeta donde se almacena el CSV y la base de datos, además habilite HTTPS para garantizar comunicaciones seguras.
+También se proporciona un archivo docker-compose.yml para construir e iniciar el servicio. Recordad cambiar el TOKEN, la ruta a la carpeta donde se almacena el CSV y la base de datos, además ¡habilitad HTTPS para garantizar comunicaciones seguras!
 
-Si desea actualizar la base de datos, simplemente copie el nuevo CSV en /data y reinicie/elimine el contenedor.
+Si queréis actualizar la base de datos, simplemente copiad el nuevo CSV en /data y reiniciad/eliminad el contenedor.
 
-**Si necesita ayuda, contáctenos en hola arroba videoatencion.com.**
+**Si necesitas ayuda, contáctanos en hola arroba videoatencion.com.**
 
 ---
 
