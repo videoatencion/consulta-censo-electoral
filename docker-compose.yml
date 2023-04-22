@@ -1,0 +1,17 @@
+version: '3.9'
+
+services:
+  censo:
+    #    build: .
+    image: harbor.videoatencion.com/library/censo-electoral:latest
+    environment:
+      - TOKEN=12345
+      - GOMAXPROCS=20
+    volumes:
+      - /path/to/my/data:/data
+    ports:
+      - "8080:8080"
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
