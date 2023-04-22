@@ -6,9 +6,10 @@ Agradecimientos especiales a Jesús Gomiz Gálvez del Ajuntament de Rubí por su
 
 ## ¿Cómo funciona?
 
-TL;TR
-
+**TL;TR**
+```
   docker run -d -p 8080:8080 -v /ruta/a/censo:/data -e TOKEN=12345 harbor.videoatencion.com/library/censo-electoral:latest
+```
 
 Este microservicio analiza un archivo CSV descargado del INE. Extrae solo la información de NIF + Fecha de nacimiento + Centro de votación y crea una base de datos Sqlite con esa información. Una vez analizado, el CSV se elimina para que no se pueda obtener información adicional de él.
 
@@ -76,10 +77,10 @@ Special Thanks to Jesus Gomiz Galvez from Ajuntament de Rubí for his support in
 
 ## How does it work?
 
-TL;TR
-  
+**TL;TR**
+```  
   docker run -d -p 8080:8080 -v /path/to/census:/data -e TOKEN=12345 harbor.videoatencion.com/library/censo-electoral:latest
-
+```
 This microservice parses a CSV file downloaded from INE. It extracts just NIF + Birth Date + Polling station information and creates a Sqlite database with that information. Once parsed, the CSV is deleted so no additional information can be gathered from it.
 
 If the service gets restarted, it will look for a new CSV. If there's a new one, it will rebuild the database with the new data. If there's no new CSV and a the database exists, it will start the service.
