@@ -6,7 +6,7 @@ Agradecimientos especiales a:
 
   - Ajuntament de Sant Vicenç dels Horts por financiar este desarrollo.
   - Jesus Gomiz Gálvez del Ajuntament de Rubí por su apoyo en proporcionar el formato del Censo Electoral extraído del Instituto Nacional de Estadística para los ayuntamientos.
-  - Miquel Estapé Valls from the AOC Consortium for his advice on security and data protection regarding WhatsApp and Telegram.
+  - Miquel Estapé Valls del Consorci AOC por sus consejos en materia de seguridad y protección de datos sobre WhatsApp y Telegram.
 
 ## ¿Cómo funciona?
 
