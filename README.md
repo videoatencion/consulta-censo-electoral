@@ -11,7 +11,7 @@ Agradecimientos especiales a:
 
 TL;TR
 ```shell
-  docker run -d -p 8080:8080 -v /ruta/a/censo:/data -e TOKEN=12345 harbor.videoatencion.com/library/censo-electoral:latest
+docker run -d -p 8080:8080 -v /ruta/a/censo:/data -e TOKEN=12345 harbor.videoatencion.com/library/censo-electoral:latest
 ```
 
 Este microservicio analiza un archivo CSV descargado del INE. Extrae solo la información de parte del DNI, parte de la fecha de nacimiento para minimizar los datos requeridos (cumplimiento LOPD/GDPR) y los datos del Centro de votación, y crea una base de datos Sqlite con esta información. Una vez analizado, el CSV original es eliminado para que no se pueda obtener información adicional de él.
@@ -47,11 +47,11 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
 
 2) Construya su docker:
 
-    docker build . -t censo:latest
+   docker build . -t censo:latest
+
 3) Ejecute el servicio:
-```shell 
-    docker run -e TOKEN=12345 -v /ruta/al/directorio/del/censo:/data -p 8080:8080 -d censo:latest
-```
+
+   docker run -e TOKEN=12345 -v /ruta/al/directorio/del/censo:/data -p 8080:8080 -d censo:latest
 
 4) Pruebe su servicio
 
@@ -85,7 +85,9 @@ Special Thanks to:
 
 TL;TR
   
-  docker run -d -p 8080:8080 -v /path/to/census:/data -e TOKEN=12345 harbor.videoatencion.com/library/censo-electoral:latest
+```shell
+docker run -d -p 8080:8080 -v /path/to/census:/data -e TOKEN=12345 harbor.videoatencion.com/library/censo-electoral:latest
+```
 
 This microservice parses a CSV file downloaded from INE. It extracts just part of the DNI and part of the Birth Date to minimize required data (GDPR compliance) plus the information of the Polling station, then it creates a Sqlite database with that information. Once parsed, the CSV is deleted so no additional information can be gathered from it.
 
@@ -120,11 +122,11 @@ The format will look like this:
 
 2) Build your docker:
 
-  - docker build . -t censo:latest
+  docker build . -t censo:latest
 
 3) Run your service:
 
-  - docker run -e TOKEN=12345 -v /path/to/census/folder:/data -p 8080:8080 -d censo:latest
+  docker run -e TOKEN=12345 -v /path/to/census/folder:/data -p 8080:8080 -d censo:latest
 
 4) Try your service:
 
@@ -144,5 +146,4 @@ A docker-compose.yml is also provided to build and launch the service. Remember 
 If you want to update the database, just copy the new CSV under /data and restart/delete the container.
 
 **If you need help, contact us at hola at videoatencion.com.**
-
 
