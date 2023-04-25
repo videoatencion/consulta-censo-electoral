@@ -48,7 +48,7 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
 
     docker build . -t censo:latest
 3) Ejecute el servicio:
-    # por defecto indexará los 5 últimos dígitos del DNI/NIE
+    
     docker run -e TOKEN=12345 -v /ruta/al/directorio/del/censo:/data -p 8080:8080 -d censo:latest
 
 4) Pruebe su servicio
