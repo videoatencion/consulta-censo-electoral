@@ -10,8 +10,9 @@ Agradecimientos especiales a:
 ## ¿Cómo funciona?
 
 TL;TR
-
+```shell
   docker run -d -p 8080:8080 -v /ruta/a/censo:/data -e TOKEN=12345 harbor.videoatencion.com/library/censo-electoral:latest
+```
 
 Este microservicio analiza un archivo CSV descargado del INE. Extrae solo la información de parte del DNI, parte de la fecha de nacimiento para minimizar los datos requeridos (cumplimiento LOPD/GDPR) y los datos del Centro de votación, y crea una base de datos Sqlite con esta información. Una vez analizado, el CSV original es eliminado para que no se pueda obtener información adicional de él.
 
@@ -48,8 +49,9 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
 
     docker build . -t censo:latest
 3) Ejecute el servicio:
-    
+```shell 
     docker run -e TOKEN=12345 -v /ruta/al/directorio/del/censo:/data -p 8080:8080 -d censo:latest
+```
 
 4) Pruebe su servicio
 
