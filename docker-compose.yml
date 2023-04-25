@@ -7,6 +7,7 @@ services:
     environment:
       - TOKEN=12345
       - GOMAXPROCS=20
+      - DOCUMENT_CHARS=5
     volumes:
       - /path/to/my/data:/data
     ports:
