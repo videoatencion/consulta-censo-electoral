@@ -56,7 +56,7 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
 
 4) Pruebe su servicio
 
-  curl -H 'Authorization: 12345' http://127.0.0.1:8080/consulta/12345X/2571
+   curl -H 'Authorization: 12345' http://127.0.0.1:8080/consulta/12345X/2571
 
 ```json
 {"poblacion":"RUBÍ","distrito":"01","seccion":"001","mesa":"A","colele":"ESCOLA RAMON LLULL","dircol":"AV FLORS 43","errorMessage":""}
@@ -131,20 +131,19 @@ The format will look like this:
 
 2) Build your docker:
 
-  docker build . -t censo:latest
+    docker build . -t censo:latest
 
 3) Run your service:
 
-  docker run -e TOKEN=12345 -v /path/to/census/folder:/data -p 8080:8080 -d censo:latest
+    docker run -e TOKEN=12345 -v /path/to/census/folder:/data -p 8080:8080 -d censo:latest
 
 4) Try your service:
 
-  curl -H 'Authorization: 12345' http://127.0.0.1:8080/consulta/12345X/2571
+   curl -H 'Authorization: 12345' http://127.0.0.1:8080/consulta/12345X/2571
 
-  ```json
-
+```json
 {"poblacion":"RUBÍ","distrito":"01","seccion":"001","mesa":"A","colele":"ESCOLA RAMON LLULL","dircol":"AV FLORS 43","errorMessage":""}
-   ```
+```
 ![Running](docs/images/image003.png)
 
 
