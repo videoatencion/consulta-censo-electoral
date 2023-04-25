@@ -5,7 +5,8 @@ Microservicio de alto rendimiento para consultar la información del centro de v
 Agradecimientos especiales a:
 
   - Ajuntament de Sant Vicenç dels Horts por financiar este desarrollo.
-  - Jesús Gomiz Gálvez del Ajuntament de Rubí por su apoyo en proporcionar el formato del Censo Electoral extraído del Instituto Nacional de Estadística para los ayuntamientos.
+  - Jesus Gomiz Gálvez del Ajuntament de Rubí por su apoyo en proporcionar el formato del Censo Electoral extraído del Instituto Nacional de Estadística para los ayuntamientos.
+  - Miquel Estapé Valls from the AOC Consortium for his advice on security and data protection regarding WhatsApp and Telegram.
 
 ## ¿Cómo funciona?
 
@@ -81,6 +82,8 @@ Special Thanks to:
 
   - Ajuntament de Sant Vicenç for funding this development.
   - Jesus Gomiz Galvez from Ajuntament de Rubí for his support in providing the format of Censo Electoral extracted from the Instituto Nacional de Estadística for the city councils.
+  - Miquel Estapé Valls from Consorci AOC for his advice in security and RGPD compliance on WhatsApp and Telegram.
+
 ## How does it work?
 
 TL;TR
