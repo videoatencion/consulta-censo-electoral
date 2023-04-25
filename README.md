@@ -68,6 +68,12 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
 
 También se proporciona un archivo docker-compose.yml para construir e iniciar el servicio. Recuerde cambiar el TOKEN, la ruta a la carpeta donde se almacena el CSV y la base de datos, además habilite HTTPS para garantizar comunicaciones seguras.
 
+En caso de detectar una colisión de entradas, el proceso abortará la importación. Puede controlarse qué se indexa mediante las siguientes variables de entorno:
+
+- DOCUMENT_CHARS (default=5): cuantos caracteres extrae del documento de identidad
+- FIRST=true (default=false): si indexa del principio o del final del documento de identidad
+- YEAR=true (default=false): si usa sólo el día de nacimiento o si añadirá los 2 últimos dígitos del año
+
 Si desea actualizar la base de datos, simplemente copie el nuevo CSV en /data y reinicie/elimine el contenedor.
 
 **Si necesita ayuda, contáctenos en hola arroba videoatencion.com.**
@@ -145,6 +151,12 @@ The format will look like this:
 ## Running in production
 
 A docker-compose.yml is also provided to build and launch the service. Remember to change the TOKEN, the path to the folder storing the CSV and the database add enable HTTPS to ensure secure communications.
+
+In case the system detects a collision, the process will abort import. You can control what is indexed with the following environment variables:
+
+- DOCUMENT_CHARS (default=5): how many characters to extract from the CitizenID
+- FIRST=true (default=false): index first or last N characters, default last
+- YEAR=true (default=false): if it only uses the birth day or also the last 2 digits of the year
 
 If you want to update the database, just copy the new CSV under /data and restart/delete the container.
 
