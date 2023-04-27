@@ -117,6 +117,11 @@ func main() {
                 citizenID := strings.ToUpper(c.Param("citizenID"))
                 birthdate := c.Param("birthdate")
 
+		// Fix birthday with just 1 char
+		if len(birthdate) == 1 {
+			birthdate = "0" + birthdate
+		}
+
                 citizenInfo, err := getCitizenFromDB(CitizenKey{citizenID+birthdate})
                 if err != nil {
                         if err == sql.ErrNoRows {
@@ -269,22 +274,41 @@ func loadCitizensFromCSV(filePath string) error {
                 if err == io.EOF {
                         break
                 }
+
                 if err != nil {
                         return fmt.Errorf("Error reading CSV file: %v", err)
                 }
+
                 rowsRead++
+
+        	if record[27] == "" || record[25] == "" {
+                        log.Printf("Empty record: %s - %s\n", record[25], record[27])
+        		continue
+//        	} else {
+//                        log.Printf("Full record: %s - %s\n", record[25], record[27])
+        	}
+
 
                 citizenID := strings.ToUpper(record[27])
                 birthdate := record[25]
                 dircol := strings.Join([]string{record[9], record[10], record[11], record[12]}, " ")
 
-                // Store only N characters of the citizenID. FIRST==true; default last
-                if envFirst, _ := strconv.ParseBool(os.Getenv("FIRST")); envFirst == true {
-                        citizenID = citizenID[:documentChars]
-                } else {
-                        citizenID = citizenID[len(citizenID)-documentChars:]
-                }
- 
+
+                // Shall we get a substring of CitizenID?
+                if envDocumentChars, _ := strconv.ParseInt(os.Getenv("DOCUMENT_CHARS"), 10, 8); envDocumentChars >= 4 {
+        		// Store only N characters of the citizenID. FIRST==true; default last
+        		if envFirst, _ := strconv.ParseBool(os.Getenv("FIRST")); envFirst == true {
+        			citizenID = citizenID[:documentChars]
+        		} else {
+        			citizenID = citizenID[len(citizenID)-documentChars:]
+        		}
+		} else if envDocumentChars == 0 {
+                        
+		} else {
+                        return fmt.Errorf("Error, documentChars is smaller than 4, aborting ")
+
+		}
+
 
                 // Allow to add the lasting 2 digits of the year in case the census has collisions
                 if envYear, _ := strconv.ParseBool(os.Getenv("YEAR")); envYear == true {
@@ -295,6 +319,7 @@ func loadCitizensFromCSV(filePath string) error {
          
 
                 citizenKey := citizenID + birthdate
+                log.Printf("KEY: %s\n", citizenKey)
 
                 lmun, _ := decoder.String(record[2])
                 dist := record[3]
