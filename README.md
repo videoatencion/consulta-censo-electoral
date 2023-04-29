@@ -56,11 +56,18 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
 
 4) Pruebe su servicio
 
-   curl -H 'Authorization: 12345' http://127.0.0.1:8080/consulta/12345X/2571
+   curl -H 'Authorization: 12345' -X POST http://127.0.0.1:8080/consulta -d '{ "citizenId": "0123A", "day": "31", "year", "91", "sn1": "AL", "sn2": "MA" }'
 
 ```json
 {"poblacion":"RUBÍ","distrito":"01","seccion":"001","mesa":"A","colele":"ESCOLA RAMON LLULL","dircol":"AV FLORS 43","errorMessage":""}
 ```
+    Sólo citizenId es obligatorio, cualquier otro parámetro es opcional. Si se encuentra más de un resultado, el sistema retorna un mensaje como este:
+
+```json
+{"errorMessage":"[day year sn2]"}
+```
+    Esto indica qué otros campos pueden pasarse para obtener un único resultado.
+
 ![Ejecutando](docs/images/image003.png)
 
 
@@ -72,7 +79,12 @@ En caso de detectar una colisión de entradas, el proceso abortará la importaci
 
 - DOCUMENT_CHARS (default=5): cuantos caracteres extrae del documento de identidad
 - FIRST=true (default=false): si indexa del principio o del final del documento de identidad
-- YEAR=true (default=false): si usa sólo el día de nacimiento o si añadirá los 2 últimos dígitos del año
+- DAY=true (default=true): indica si indexaremos los dos dígitos del día de nacimiento
+- YEAR=true (default=false): indica si indexaremos los dos últimos dígitos del año de nacimiento
+- FN=true (default=false): indica si indexaremos los N primeros caracteres del nombre
+- SN1=true (default=false): indica si indexaremos los N primeros caracteres del primer apellido
+- SN2=true (default=false): indica si indexaremos los N primeros caracteres del segundo apellido
+- NAME_CHARS (default=2): indica el número de caracteres a indexar para nombre o apellidos
 
 Si desea actualizar la base de datos, simplemente copie el nuevo CSV en /data y reinicie/elimine el contenedor.
 
@@ -139,11 +151,18 @@ The format will look like this:
 
 4) Try your service:
 
-   curl -H 'Authorization: 12345' http://127.0.0.1:8080/consulta/12345X/2571
+   curl -H 'Authorization: 12345' -X POST http://127.0.0.1:8080/consulta -d '{ "citizenId": "0123A", "day": "31", "year", "91", "sn1": "AL", "sn2": "MA" }'
 
 ```json
 {"poblacion":"RUBÍ","distrito":"01","seccion":"001","mesa":"A","colele":"ESCOLA RAMON LLULL","dircol":"AV FLORS 43","errorMessage":""}
 ```
+    Only citizenId is mandatory, any other parameter is optional. If more than 1 record match, the system will return a message like this:
+
+```json
+{"errorMessage":"[day year sn2]"}
+```
+    This indicates every possible field that could be used to get a single record
+
 ![Running](docs/images/image003.png)
 
 
@@ -155,7 +174,12 @@ In case the system detects a collision, the process will abort import. You can c
 
 - DOCUMENT_CHARS (default=5): how many characters to extract from the CitizenID
 - FIRST=true (default=false): index first or last N characters, default last
-- YEAR=true (default=false): if it only uses the birth day or also the last 2 digits of the year
+- DAY=true (default=true): index the two digits of the birth day
+- YEAR=true (default=false): index the last 2 digits of the year from the birth date
+- FN=true (default=false): index the first N characters of the firstname
+- SN1=true (default=false): index the first N characters of the first lastname
+- SN2=true (default=false): index the first N characters of the second lastname
+- NAME_CHARS (default=2): define the number of characters to index for the firstname or the surnames
 
 If you want to update the database, just copy the new CSV under /data and restart/delete the container.
 
