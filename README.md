@@ -52,7 +52,25 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
 
 3) Ejecute el servicio:
 
-   docker run -e TOKEN=12345 -v /ruta/al/directorio/del/censo:/data -p 8080:8080 -d censo:latest
+    docker run -e TOKEN=12345 -v /ruta/al/directorio/del/censo:/data -p 8080:8080 -d censo:latest
+      o
+    docker run -d -e TOKEN=12345 -e DOCUMENT_CHARS=5 -e FIRST_CHARS=true -e FIRST_CHARS_ADD_LETTER=true  -e NAME_CHARS=2 -e DAY=true -e YEAR=true -e FN=true -e SN1=true -e SN2=false -e POST_CODE=false -v /data:/data   harbor.videoatencion.com/library/censo-electoral:latest
+
+    Si miráis los logs, se verá algo así:
+```
+    2023/04/28 10:48:13 CSV import process: 21368 rows read, 21360 rows imported
+    2023/04/28 10:48:13 citizen_id+sn1 = 98.69%
+    2023/04/28 10:48:13 citizen_id+day = 98.38%
+    2023/04/28 10:48:13 citizen_id+fn = 98.12%
+    2023/04/28 10:48:13 citizen_id+year = 92.43%
+    2023/04/28 10:48:13 citizen_id = 70.74%
+    2023/04/28 10:48:13 citizen_id+sn2 = 70.74%
+    2023/04/28 10:48:13 citizen_id+postCode = 70.74%
+    2023/04/28 10:48:13 Citizens loaded in 324.35326ms
+```
+
+    Aquí podemos ver que el proceso de importación ha funcionado sin colisiones, y el % de resoluciones que podemos esperar sólo consultando el documento de identidad o el documento y un campo adicional. Los 8 registros no importados han sido causados por filas con el campo del documento de identidad o la fecha de nacimiento vacías.
+
 
 4) Pruebe su servicio
 
@@ -66,7 +84,7 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
 ```json
 {"errorMessage":"[day year sn2]"}
 ```
-    Esto indica qué otros campos pueden pasarse para obtener un único resultado.
+    Esto indica qué otros campos pueden pasarse para obtener un resultado único.
 
 ![Ejecutando](docs/images/image003.png)
 
@@ -78,13 +96,14 @@ También se proporciona un archivo docker-compose.yml para construir e iniciar e
 En caso de detectar una colisión de entradas, el proceso abortará la importación. Puede controlarse qué se indexa mediante las siguientes variables de entorno:
 
 - DOCUMENT_CHARS (default=5): cuantos caracteres extrae del documento de identidad
-- FIRST=true (default=false): si indexa del principio o del final del documento de identidad
-- DAY=true (default=true): indica si indexaremos los dos dígitos del día de nacimiento
-- YEAR=true (default=false): indica si indexaremos los dos últimos dígitos del año de nacimiento
-- FN=true (default=false): indica si indexaremos los N primeros caracteres del nombre
-- SN1=true (default=false): indica si indexaremos los N primeros caracteres del primer apellido
-- SN2=true (default=false): indica si indexaremos los N primeros caracteres del segundo apellido
-- NAME_CHARS (default=2): indica el número de caracteres a indexar para nombre o apellidos
+- NAME_CHARS (default=2): número de caracteres a indexar para nombre o apellidos
+- FIRST_CHARS=true (default=false): lee el documento desde el principio (true) o desde el final (false)
+- FIRST_CHARS_ADD_LETTER=true (default=false): añadir la letra del final del documento [ 12345678A -> 12345A ]
+- DAY=true (default=true): activa dd
+- YEAR=true (default=false): activa yy
+- FN=true (default=false): activa nombre
+- SN1=true (default=false): activa apellido1
+- SN2=true (default=false): activa apellido2
 
 Si desea actualizar la base de datos, simplemente copie el nuevo CSV en /data y reinicie/elimine el contenedor.
 
@@ -148,6 +167,23 @@ The format will look like this:
 3) Run your service:
 
     docker run -e TOKEN=12345 -v /path/to/census/folder:/data -p 8080:8080 -d censo:latest
+      or
+    docker run -d -e TOKEN=12345 -e DOCUMENT_CHARS=5 -e FIRST_CHARS=true -e FIRST_CHARS_ADD_LETTER=true  -e NAME_CHARS=2 -e DAY=true -e YEAR=true -e FN=true -e SN1=true -e SN2=false -e POST_CODE=false -v /data:/data   harbor.videoatencion.com/library/censo-electoral:latest
+
+    If you check the logs you will see something like this:
+```
+    2023/04/28 10:48:13 CSV import process: 21368 rows read, 21360 rows imported
+    2023/04/28 10:48:13 citizen_id+sn1 = 98.69%
+    2023/04/28 10:48:13 citizen_id+day = 98.38%
+    2023/04/28 10:48:13 citizen_id+fn = 98.12%
+    2023/04/28 10:48:13 citizen_id+year = 92.43%
+    2023/04/28 10:48:13 citizen_id = 70.74%
+    2023/04/28 10:48:13 citizen_id+sn2 = 70.74%
+    2023/04/28 10:48:13 citizen_id+postCode = 70.74%
+    2023/04/28 10:48:13 Citizens loaded in 324.35326ms
+```
+
+    Here we can see that the import process worked, and what % of resolutions can we expect with just the citizenId or citizenId + an optional field. The 8 rows not imported are caused by rows with citizenId or birthDate empty.
 
 4) Try your service:
 
@@ -173,13 +209,14 @@ A docker-compose.yml is also provided to build and launch the service. Remember 
 In case the system detects a collision, the process will abort import. You can control what is indexed with the following environment variables:
 
 - DOCUMENT_CHARS (default=5): how many characters to extract from the CitizenID
-- FIRST=true (default=false): index first or last N characters, default last
-- DAY=true (default=true): index the two digits of the birth day
-- YEAR=true (default=false): index the last 2 digits of the year from the birth date
-- FN=true (default=false): index the first N characters of the firstname
-- SN1=true (default=false): index the first N characters of the first lastname
-- SN2=true (default=false): index the first N characters of the second lastname
 - NAME_CHARS (default=2): define the number of characters to index for the firstname or the surnames
+- FIRST_CHARS=true (default=false): read the CitizenId from the beginning (true) of from the end (false)
+- FIRST_CHARS_ADD_LETTER=true (default=false): if we should append the letter at the end of the CitizenID to the string
+- DAY=true (default=true): enable dd
+- YEAR=true (default=false): enable yy
+- FN=true (default=false): enable firstname
+- SN1=true (default=false): enable lastname1
+- SN2=true (default=false): enable lastname2
 
 If you want to update the database, just copy the new CSV under /data and restart/delete the container.
 
