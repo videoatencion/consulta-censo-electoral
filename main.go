@@ -173,12 +173,14 @@ func main() {
 		
 		citizenInfo, numResults, err := getCitizenFromDB(key)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"errorMessage": err.Error()})
+//			c.JSON(http.StatusInternalServerError, gin.H{"errorMessage": err.Error()})
+			c.JSON(http.StatusOK, gin.H{"errorMessage": err.Error()})
 			return
 		}
 		
 		if numResults > 1 {
-			c.JSON(http.StatusBadRequest, gin.H{"errorMessage": err})
+//			c.JSON(http.StatusBadRequest, gin.H{"errorMessage": err})
+			c.JSON(http.StatusOK, gin.H{"errorMessage": err})
 			return
 		}
 		
