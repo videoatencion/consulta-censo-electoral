@@ -69,22 +69,22 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
     2023/04/28 10:48:13 Citizens loaded in 324.35326ms
 ```
 
-    Aquí podemos ver que el proceso de importación ha funcionado sin colisiones, y el % de resoluciones que podemos esperar sólo consultando el documento de identidad o el documento y un campo adicional. Los 8 registros no importados han sido causados por filas con el campo del documento de identidad o la fecha de nacimiento vacías.
+  Aquí podemos ver que el proceso de importación ha funcionado sin colisiones, y el % de resoluciones que podemos esperar sólo consultando el documento de identidad o el documento y un campo adicional. Los 8 registros no importados han sido causados por filas con el campo del documento de identidad o la fecha de nacimiento vacías.
 
 
 4) Pruebe su servicio
 
-   curl -H 'Authorization: 12345' -X POST http://127.0.0.1:8080/consulta -d '{ "citizenId": "0123A", "day": "31", "year", "91", "sn1": "AL", "sn2": "MA" }'
+    curl -H 'Authorization: 12345' -X POST http://127.0.0.1:8080/consulta -d '{ "citizenId": "0123A", "day": "31", "year", "91", "sn1": "AL", "sn2": "MA" }'
 
 ```json
 {"poblacion":"RUBÍ","distrito":"01","seccion":"001","mesa":"A","colele":"ESCOLA RAMON LLULL","dircol":"AV FLORS 43","errorMessage":""}
 ```
-    Sólo citizenId es obligatorio, cualquier otro parámetro es opcional. Si se encuentra más de un resultado, el sistema retorna un mensaje como este:
+  Sólo citizenId es obligatorio, cualquier otro parámetro es opcional. Si se encuentra más de un resultado, el sistema retorna un mensaje como este:
 
 ```json
 {"errorMessage":"[day year sn2]"}
 ```
-    Esto indica qué otros campos pueden pasarse para obtener un resultado único.
+  Esto indica qué otros campos pueden pasarse para obtener un resultado único.
 
 ![Ejecutando](docs/images/image003.png)
 
@@ -183,21 +183,21 @@ The format will look like this:
     2023/04/28 10:48:13 Citizens loaded in 324.35326ms
 ```
 
-    Here we can see that the import process worked, and what % of resolutions can we expect with just the citizenId or citizenId + an optional field. The 8 rows not imported are caused by rows with citizenId or birthDate empty.
+  Here we can see that the import process worked, and what % of resolutions can we expect with just the citizenId or citizenId + an optional field. The 8 rows not imported are caused by rows with citizenId or birthDate empty.
 
 4) Try your service:
 
-   curl -H 'Authorization: 12345' -X POST http://127.0.0.1:8080/consulta -d '{ "citizenId": "0123A", "day": "31", "year", "91", "sn1": "AL", "sn2": "MA" }'
+    curl -H 'Authorization: 12345' -X POST http://127.0.0.1:8080/consulta -d '{ "citizenId": "0123A", "day": "31", "year", "91", "sn1": "AL", "sn2": "MA" }'
 
 ```json
 {"poblacion":"RUBÍ","distrito":"01","seccion":"001","mesa":"A","colele":"ESCOLA RAMON LLULL","dircol":"AV FLORS 43","errorMessage":""}
 ```
-    Only citizenId is mandatory, any other parameter is optional. If more than 1 record match, the system will return a message like this:
+  Only citizenId is mandatory, any other parameter is optional. If more than 1 record match, the system will return a message like this:
 
 ```json
 {"errorMessage":"[day year sn2]"}
 ```
-    This indicates every possible field that could be used to get a single record
+  This indicates every possible field that could be used to get a single record
 
 ![Running](docs/images/image003.png)
 
