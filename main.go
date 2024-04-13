@@ -35,6 +35,7 @@ type CitizenInfo struct {
 	Mesa         string `json:"mesa"`
 	Colele       string `json:"colele"`
 	Dircol       string `json:"dircol"`
+	PostCode     string `json:"postCode"`
 	ErrorMessage string `json:"errorMessage"`
 }
 
@@ -60,10 +61,27 @@ type RequestData struct {
 	Colele       string `json:"colele`
 }
 
+type CitizenResults struct {
+	CitizenID    string
+	Day          string
+	Year         string
+	Fn           string
+	Sn1          string
+	Sn2          string
+	PostCode     string
+	Colele       string
+	Poblacion    string
+	Distrito     string
+	Seccion      string
+	Mesa         string
+	Dircol       string
+}
+
 type ComboResult struct {
 	Combo      []string
 	Percentage float64
 }
+
 
 func main() {
 
@@ -172,6 +190,7 @@ func main() {
 		}
 		
 		citizenInfo, numResults, err := getCitizenFromDB(key)
+//		fmt.Printf("%+v\n", citizenInfo)
 		if err != nil {
 //			c.JSON(http.StatusInternalServerError, gin.H{"errorMessage": err.Error()})
 			c.JSON(http.StatusOK, gin.H{"errorMessage": err.Error()})
@@ -188,7 +207,9 @@ func main() {
 	})
 
 	r.Run()
+
 }
+
 
 func isDBReady() bool {
 	dbReadyMutex.Lock()
@@ -310,6 +331,9 @@ func initDB(dbPath string) (*sql.DB, error) {
 			sn2 TEXT NOT NULL,
 			postCode TEXT NOT NULL,
 			colele TEXT NOT NULL,
+			distrito TEXT NOT NULL,
+			seccion TEXT NOT NULL,
+			mesa TEXT NOT NULL,
 			PRIMARY KEY (citizen_id, day, year, fn, sn1, sn2),
 			FOREIGN KEY (colele) REFERENCES polling_stations (id)
 		)
@@ -318,9 +342,6 @@ func initDB(dbPath string) (*sql.DB, error) {
 		CREATE TABLE IF NOT EXISTS polling_stations (
 			id TEXT PRIMARY KEY,
 			poblacion TEXT,
-			distrito TEXT,
-			seccion TEXT,
-			mesa TEXT,
 			dircol TEXT
 		)
 	`
@@ -372,13 +393,13 @@ func loadCitizensFromCSV(filePath string) error {
 	}
 	defer tx.Rollback()
 
-	insertCitizenStmt, err := tx.Prepare(`INSERT INTO citizens (citizen_id, day, year, fn, sn1, sn2, postCode, colele) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+	insertCitizenStmt, err := tx.Prepare(`INSERT INTO citizens (citizen_id, day, year, fn, sn1, sn2, postCode, colele, distrito, seccion, mesa) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("Error preparing citizen insert statement: %v", err)
 	}
 	defer insertCitizenStmt.Close()
 
-	insertPollingStationStmt, err := tx.Prepare(`INSERT OR IGNORE INTO polling_stations (id, poblacion, distrito, seccion, mesa, dircol) VALUES (?, ?, ?, ?, ?, ?)`)
+	insertPollingStationStmt, err := tx.Prepare(`INSERT OR IGNORE INTO polling_stations (id, poblacion, dircol) VALUES (?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("Error preparing polling station insert statement: %v", err)
 	}
@@ -476,15 +497,15 @@ func loadCitizensFromCSV(filePath string) error {
 		mesa := record[5]
 		nlocal, _ := decoder.String(record[6])
 
-		_, err = insertCitizenStmt.Exec(citizenID, day, year, fn, sn1, sn2, postCode, nlocal)
+		_, err = insertCitizenStmt.Exec(citizenID, day, year, fn, sn1, sn2, postCode, nlocal, dist, secc, mesa)
 		if err != nil {
-			return fmt.Errorf("Error inserting citizen: %v - %v - %v - %v - %v - %v - %v - %v", err, citizenID, day, year, fn, sn1, sn2, postCode)
+			return fmt.Errorf("Error inserting citizen: %v - %v - %v - %v - %v - %v - %v - %v - %v - %v - %v", err, citizenID, day, year, fn, sn1, sn2, postCode, dist, secc, mesa)
 		}
 		rowsImported++
 
 //	        log.Printf("Decoded record: %s - %s - %s\n", fn, sn1, sn2)
 
-		_, err = insertPollingStationStmt.Exec(nlocal, lmun, dist, secc, mesa, strings.TrimSpace(dircol))
+		_, err = insertPollingStationStmt.Exec(nlocal, lmun, strings.TrimSpace(dircol))
 		if err != nil {
 			return fmt.Errorf("Error inserting polling station: %v", err)
 		}
@@ -499,18 +520,22 @@ func loadCitizensFromCSV(filePath string) error {
 	return nil
 }
 
+
 func getCitizenFromDB(key CitizenKey) (CitizenInfo, int, error) {
-	citizenInfo := CitizenInfo{}
+	var citizenInfo CitizenInfo
+	var results[] CitizenResults
 
 	query := `
 		SELECT
-			c.citizen_id, c.day, c.year, c.fn, c.sn1, c.sn2, c.postCode, c.colele
+			c.citizen_id, c.day, c.year, c.fn, c.sn1, c.sn2, c.postCode, c.colele, c.distrito, c.seccion, c.mesa, p.poblacion, p.dircol
 		FROM
 			citizens c
+			JOIN polling_stations p ON c.colele = p.id
 		WHERE
 			c.citizen_id = ?`
-	
+
 	args := []interface{}{key.CitizenID}
+
 	if key.Day != "" {
 		query += " AND c.day = ?"
 		args = append(args, key.Day)
@@ -540,66 +565,57 @@ func getCitizenFromDB(key CitizenKey) (CitizenInfo, int, error) {
 		args = append(args, key.Colele)
 	}
 
-
 	rows, err := db.Query(query, args...)
-
 	if err != nil {
 		return citizenInfo, 0, err
 	}
 	defer rows.Close()
 
-	var results []CitizenKey
 	for rows.Next() {
-	var result CitizenKey
-	err = rows.Scan(
-		&result.CitizenID, &result.Day, &result.Year, &result.Fn, &result.Sn1, &result.Sn2, &result.PostCode, &result.Colele,
-	)
-
-	if err != nil {
-		return citizenInfo, 0, err
-	}
+		var result CitizenResults
+		err = rows.Scan(&result.CitizenID, &result.Day, &result.Year, &result.Fn, &result.Sn1, &result.Sn2,
+						&result.PostCode, &result.Colele, &result.Distrito, &result.Seccion, &result.Mesa,
+						&result.Poblacion, &result.Dircol)
+		if err != nil {
+			return CitizenInfo{}, 0, err
+		}
 		results = append(results, result)
 	}
 
-	if len(results) == 0 {
-		return citizenInfo, len(results), fmt.Errorf("No match found")
-	} else if len(results) > 1 {
-		diffFields := findDifferingFieldsCitizens(results)
-		return citizenInfo, len(results), fmt.Errorf("%v", diffFields)
-	}
-
-	// Query for the CitizenInfo using the unique CitizenKey
 	if len(results) == 1 {
-		citizenID := results[0].CitizenID
-		day       := results[0].Day
-		year      := results[0].Year
-		fn        := results[0].Fn
-		sn1       := results[0].Sn1
-		sn2       := results[0].Sn2
-		postCode  := results[0].PostCode
-
-		infoQuery := `
-			SELECT
-				p.poblacion, p.distrito, p.seccion, p.mesa, p.dircol, c.colele
-			FROM
-				citizens c
-				JOIN polling_stations p ON c.colele = p.id
-			WHERE
-				c.citizen_id = ? AND c.day = ? AND c.year = ? AND c.fn = ? AND c.sn1 = ? AND c.sn2 = ? AND c.postCode = ?
-		`
-
-		err = db.QueryRow(infoQuery, citizenID, day, year, fn, sn1, sn2, postCode).Scan(
-			&citizenInfo.Poblacion, &citizenInfo.Distrito, &citizenInfo.Seccion,
-			&citizenInfo.Mesa, &citizenInfo.Dircol, &citizenInfo.Colele,
-		)
-
-		if err != nil {
-			return citizenInfo, len(results), err
+		citizenInfo := CitizenInfo{
+			Poblacion: results[0].Poblacion,
+			Distrito:  results[0].Distrito,
+			Seccion:   results[0].Seccion,
+			Mesa:      results[0].Mesa,
+			Colele:    results[0].Colele,
+			Dircol:    results[0].Dircol,
+			PostCode:  results[0].PostCode,
 		}
+
+		return citizenInfo, 1, nil  // Return the single filled CitizenInfo
+
+	} else if len(results) > 1 {
+		var citizenKeys []CitizenKey
+		for _, info := range results {
+			citizenKey := CitizenKey{
+				CitizenID: info.CitizenID,
+				Day:       info.Day,
+				Year:      info.Year,
+				Fn:        info.Fn,
+				Sn1:       info.Sn1,
+				Sn2:       info.Sn2,
+				PostCode:  info.PostCode,
+				Colele:    info.Colele,
+			}
+			citizenKeys = append(citizenKeys, citizenKey)
+		}
+                diffFields := findDifferingFieldsCitizens(citizenKeys)
+                return CitizenInfo{}, len(results), fmt.Errorf("%v", diffFields)
 	}
 
-	// len(results) might be 1 and shoudn't reach this point
-	return citizenInfo, len(results), err
+	return CitizenInfo{}, 0, fmt.Errorf("no records found")
+
 }
 
 func findDifferingFieldsCitizens(results []CitizenKey) []string {
@@ -714,6 +730,7 @@ func TokenAuthMiddleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
 
 func truncateUTF8String(s string, n int) string {
     if utf8.RuneCountInString(s) <= n {
