@@ -117,7 +117,7 @@ Si desea actualizar la base de datos, simplemente copie el nuevo CSV en /data y 
 
 ## Cliente web
 
-[consulta-censo-electoral-web-client](https://github.com/videoatencion/consulta-censo-electoral-web-client) es una web (SPA en React) para que cualquier ciudadano consulte dónde vota. Pide el DNI/NIE y, si hace falta desempatar, sólo la siguiente pregunta útil (usa el orden de la lista de campos descrito arriba). El nombre del ente, el logotipo, el contacto de ayuda y el enlace al trámite de reclamación del censo se configuran con un `config.json`.
+[consulta-censo-electoral-web](https://github.com/videoatencion/consulta-censo-electoral-web) es una web (SPA en React) para que cualquier ciudadano consulte dónde vota. Pide el DNI/NIE y, si hace falta desempatar, sólo la siguiente pregunta útil (usa el orden de la lista de campos descrito arriba). El nombre del ente, el logotipo, el contacto de ayuda y el enlace al trámite de reclamación del censo se configuran con un `config.json`.
 
 La web no habla directamente con este microservicio: la sirve un nginx que hace de proxy y añade el `TOKEN`, de forma que el token nunca llega al navegador. Así, este microservicio no debe exponerse a Internet; sólo el servicio `web`:
 
@@ -137,7 +137,7 @@ services:
       - ./data:/data
 
   web:
-    build: https://github.com/videoatencion/consulta-censo-electoral-web-client.git
+    build: https://github.com/videoatencion/consulta-censo-electoral-web.git
     restart: unless-stopped
     environment:
       BACKEND_URL: http://censo:8080
@@ -279,7 +279,7 @@ If you want to update the database, just copy the new CSV under /data and restar
 
 ## Web client
 
-[consulta-censo-electoral-web-client](https://github.com/videoatencion/consulta-censo-electoral-web-client) is a web app (React SPA) for any citizen to look up where they vote. It asks for the DNI/NIE and, when a tie must be broken, only the next useful question (it follows the order of the field list described above). The entity name, logo, help contact and the link to the census complaint procedure are set in a `config.json`.
+[consulta-censo-electoral-web](https://github.com/videoatencion/consulta-censo-electoral-web) is a web app (React SPA) for any citizen to look up where they vote. It asks for the DNI/NIE and, when a tie must be broken, only the next useful question (it follows the order of the field list described above). The entity name, logo, help contact and the link to the census complaint procedure are set in a `config.json`.
 
 The web app does not talk to this microservice directly: it is served by an nginx that proxies the requests and adds the `TOKEN`, so the token never reaches the browser. This microservice must therefore not be exposed to the Internet; only the `web` service is:
 
@@ -299,7 +299,7 @@ services:
       - ./data:/data
 
   web:
-    build: https://github.com/videoatencion/consulta-censo-electoral-web-client.git
+    build: https://github.com/videoatencion/consulta-censo-electoral-web.git
     restart: unless-stopped
     environment:
       BACKEND_URL: http://censo:8080
