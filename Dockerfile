@@ -1,24 +1,21 @@
-FROM	golang:1.20.3-alpine as build
+FROM	golang:1.27-alpine AS build
 
-RUN	apk update && \
-	apk upgrade && \
-	apk add alpine-sdk
+WORKDIR	/src
+COPY	go.mod go.sum ./
+RUN	go mod download
+COPY	*.go ./
+# Pure Go SQLite driver: no CGO, fully static binary.
+RUN	CGO_ENABLED=0 go test ./... && \
+	CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "-w -s" -o /out/censoElectoral .
 
-RUN	mkdir /go/censoElectoral
-COPY	main.go /go/censoElectoral
-WORKDIR	/go/censoElectoral
+FROM	gcr.io/distroless/static-debian13:nonroot
+COPY	--from=build /out/censoElectoral /censoElectoral
 
-RUN	go mod init censoElectoral  && \
-	go get -u && \
-	go mod tidy
-RUN	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o censoElectoral -ldflags "-w -s" .
-
-FROM	alpine:latest
-COPY	--from=build /go/censoElectoral/censoElectoral /censoElectoral
-RUN	apk update && \
-	apk upgrade --no-cache && \
-	apk add --no-cache sqlite-libs
-
+# Keep the historical uid so existing /data volumes stay writable.
 USER	1000:1000
+EXPOSE	8080
+
+# A large census can take a while to import; /health answers 503 meanwhile.
+HEALTHCHECK	--interval=30s --timeout=5s --start-period=10m CMD ["/censoElectoral", "healthcheck"]
 
 ENTRYPOINT	["/censoElectoral"]

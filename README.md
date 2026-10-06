@@ -17,19 +17,20 @@ docker run -d -p 8080:8080 -v /ruta/a/censo:/data -e TOKEN=12345 harbor.videoate
 
 Este microservicio analiza un archivo CSV descargado del INE. Extrae solo la información de parte del DNI, parte de la fecha de nacimiento para minimizar los datos requeridos (cumplimiento LOPD/GDPR) y los datos del Centro de votación, y crea una base de datos Sqlite con esta información. Una vez analizado, el CSV original es eliminado para que no se pueda obtener información adicional de él.
 
-Si el servicio se reinicia, buscará un nuevo CSV. Si hay uno nuevo, reconstruirá la base de datos con los nuevos datos. Si no hay un nuevo CSV y existe la base de datos, iniciará el servicio.
+Si el servicio se reinicia, buscará un nuevo CSV. Si hay uno nuevo, reconstruirá la base de datos con los nuevos datos. Si no hay un nuevo CSV y existe la base de datos, iniciará el servicio. Si hay varios CSV (p. ej. un censo por municipio de una comarca) se importan todos en la misma base de datos.
+
+La base de datos se construye en un fichero temporal y sólo sustituye a la anterior si la importación termina sin errores. Mientras se importa, el servicio ya escucha y `GET /health` responde 503; cuando la base de datos está lista responde 200.
 
 El microservicio se ha probado en un hardware doméstico con un rendimiento excelente:
 
 ```
-Tamaño de la base de datos:      3.000.000
+Tamaño de la base de datos:        300.000
+Tiempo de importación:                9 s
 Solicitudes paralelas:                  25
-Solicitudes por segundo:               624
-CPUs utilizadas:                       0.4
+Solicitudes por segundo:           20.000
+CPUs (límite):                           2
+RAM:                                16 MB
 ```
-
-
-Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millones de solicitudes por hora con menos de 1 CPU y 128 MB de RAM.
 
 ## Empezando
 
@@ -74,7 +75,7 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
 
 4) Pruebe su servicio
 
-    curl -H 'Authorization: 12345' -X POST http://127.0.0.1:8080/consulta -d '{ "citizenId": "0123A", "day": "31", "year", "91", "sn1": "AL", "sn2": "MA" }'
+    curl -H 'Authorization: 12345' -X POST http://127.0.0.1:8080/consulta -d '{ "citizenId": "0123A", "day": "31", "year": "91", "sn1": "AL", "sn2": "MA" }'
 
 ```json
 {"poblacion":"RUBÍ","distrito":"01","seccion":"001","mesa":"A","colele":"ESCOLA RAMON LLULL","dircol":"AV FLORS 43","errorMessage":""}
@@ -84,7 +85,9 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
 ```json
 {"errorMessage":"[day year sn2]"}
 ```
-  Esto indica qué otros campos pueden pasarse para obtener un resultado único.
+  Esto indica qué otros campos pueden pasarse para obtener un resultado único. La lista está ordenada de más a menos útil: primero los campos que por sí solos determinan la mesa, después los que dejan menos mesas posibles y, a igualdad, los más fáciles de responder (día, año, primer apellido, segundo apellido, nombre, código postal). Basta con preguntar al ciudadano el primero; si no lo sabe, el siguiente. Los campos que no ayudan a distinguir la mesa no se incluyen, y `[colele]` significa que ningún dato del ciudadano puede deshacer el empate. Si todos los registros que coinciden votan en la misma mesa se devuelve directamente esa mesa, sin pedir más datos.
+
+  El servicio aplica a la consulta la misma normalización que a la importación, así que se puede enviar el valor reducido o el completo: `"citizenId": "12345678-A"` equivale a `"5678A"`, `"sn1": "Álvarez"` a `"AL"`, `"day": "5"` a `"05"` y `"year": "1991"` a `"91"`. Los nombres se comparan sin acentos (À→A, Ç→C, Ñ→N). Los campos que no estén indexados se ignoran. Todos los errores se devuelven con código 200 y `errorMessage` (integración con MessageBird), excepto un token incorrecto (403) y el servicio todavía cargando (503).
 
 ![Ejecutando](docs/images/image003.png)
 
@@ -93,19 +96,64 @@ Por lo tanto, puede determinar el centro de votación a una tasa de 2,24 millone
 
 También se proporciona un archivo docker-compose.yml para construir e iniciar el servicio. Recuerde cambiar el TOKEN, la ruta a la carpeta donde se almacena el CSV y la base de datos, además habilite HTTPS para garantizar comunicaciones seguras.
 
-En caso de detectar una colisión de entradas, el proceso abortará la importación. Puede controlarse qué se indexa mediante las siguientes variables de entorno:
+Si dos ciudadanos con la misma clave votan en mesas distintas (colisión) la importación se aborta, se informa de cuántas colisiones hay y se conserva el CSV y la base de datos anterior. Los duplicados que votan en la misma mesa no son un problema y se ignoran. Ante una colisión, active más campos de desempate (SN2, POST_CODE, FN, YEAR...) en lugar de aumentar DOCUMENT_CHARS, que almacena más parte del documento. En un municipio grande, `DOCUMENT_CHARS=5` con `DAY`, `YEAR`, `SN1`, `SN2` y `POST_CODE` suele ser suficiente.
 
-- DOCUMENT_CHARS (default=5): cuantos caracteres extrae del documento de identidad
+Puede controlarse qué se indexa mediante las siguientes variables de entorno (un valor no válido detiene el servicio):
+
+- TOKEN (obligatorio): valor de la cabecera `Authorization` (se acepta también `Bearer <token>`)
+- DOCUMENT_CHARS (default=5): cuántos caracteres extrae del documento de identidad. 0 guarda el documento entero
 - NAME_CHARS (default=2): número de caracteres a indexar para nombre o apellidos
 - FIRST_CHARS=true (default=false): lee el documento desde el principio (true) o desde el final (false)
-- FIRST_CHARS_ADD_LETTER=true (default=false): añadir la letra del final del documento [ 12345678A -> 12345A ]
-- DAY=true (default=true): activa dd
+- FIRST_CHARS_ADD_LETTER=true (default=false): con FIRST_CHARS, añade la letra del final del documento [ 12345678A -> 12345A ]
+- DAY=true (default=false): activa dd
 - YEAR=true (default=false): activa yy
 - FN=true (default=false): activa nombre
 - SN1=true (default=false): activa apellido1
 - SN2=true (default=false): activa apellido2
+- POST_CODE=true (default=false): activa el código postal (columna CPOSTAM)
+- TIMEZONE (default=UTC), PORT (default=8080), DATA_DIR (default=/data)
 
-Si desea actualizar la base de datos, simplemente copie el nuevo CSV en /data y reinicie/elimine el contenedor.
+Si desea actualizar la base de datos, simplemente copie el nuevo CSV en /data y reinicie/elimine el contenedor. Una base de datos creada por una versión anterior a la 2 no se puede servir: hay que volver a cargar el CSV.
+
+## Cliente web
+
+[consulta-censo-electoral-web-client](https://github.com/videoatencion/consulta-censo-electoral-web-client) es una web (SPA en React) para que cualquier ciudadano consulte dónde vota. Pide el DNI/NIE y, si hace falta desempatar, sólo la siguiente pregunta útil (usa el orden de la lista de campos descrito arriba). El nombre del ente, el logotipo, el contacto de ayuda y el enlace al trámite de reclamación del censo se configuran con un `config.json`.
+
+La web no habla directamente con este microservicio: la sirve un nginx que hace de proxy y añade el `TOKEN`, de forma que el token nunca llega al navegador. Así, este microservicio no debe exponerse a Internet; sólo el servicio `web`:
+
+```yaml
+services:
+  censo:
+    image: harbor.videoatencion.com/library/censo-electoral:latest
+    restart: unless-stopped
+    environment:
+      TOKEN: ${TOKEN:?}
+      DAY: "true"
+      YEAR: "true"
+      SN1: "true"
+      SN2: "true"
+      POST_CODE: "true"
+    volumes:
+      - ./data:/data
+
+  web:
+    build: https://github.com/videoatencion/consulta-censo-electoral-web-client.git
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://censo:8080
+      BACKEND_TOKEN: ${TOKEN:?}
+    volumes:
+      - ./config.json:/usr/share/nginx/html/config.json:ro
+      - ./logo.svg:/usr/share/nginx/html/logo.svg:ro
+    ports:
+      - "8080:8080"
+```
+
+```shell
+TOKEN=$(openssl rand -hex 32) docker compose up -d
+```
+
+Vea el README del cliente web para el formato de `config.json`, el límite de peticiones y el despliegue detrás de un balanceador.
 
 **Si necesita ayuda, contáctenos en hola arroba videoatencion.com.**
 
@@ -131,18 +179,20 @@ docker run -d -p 8080:8080 -v /path/to/census:/data -e TOKEN=12345 harbor.videoa
 
 This microservice parses a CSV file downloaded from INE. It extracts just part of the DNI and part of the Birth Date to minimize required data (GDPR compliance) plus the information of the Polling station, then it creates a Sqlite database with that information. Once parsed, the CSV is deleted so no additional information can be gathered from it.
 
-If the service gets restarted, it will look for a new CSV. If there's a new one, it will rebuild the database with the new data. If there's no new CSV and a the database exists, it will start the service.
+If the service gets restarted, it will look for a new CSV. If there's a new one, it will rebuild the database with the new data. If there's no new CSV and the database exists, it will start the service. Several CSV files (e.g. one per municipality) are all imported into the same database.
+
+The database is built in a temporary file and replaces the previous one only when the import succeeds. While importing, the service is already listening and `GET /health` answers 503; it answers 200 once the database is ready.
 
 The microservice has been tested in commodity hardware with excellent performance:
 
 ```
-Database size:          3.000.000
+Database size:            300.000
+Import time:                  9 s
 Parallel requests:             25
-Requests per second:          624
-CPUs used:                    0.4
+Requests per second:       20.000
+CPUs (limit):                   2
+RAM:                        16 MB
 ```
-
-So, it can determine the polling station at a rate of 2.24M requests / hour with less than 1 CPU and 128MB of RAM.
 
 
 ## Getting started
@@ -187,7 +237,7 @@ The format will look like this:
 
 4) Try your service:
 
-    curl -H 'Authorization: 12345' -X POST http://127.0.0.1:8080/consulta -d '{ "citizenId": "0123A", "day": "31", "year", "91", "sn1": "AL", "sn2": "MA" }'
+    curl -H 'Authorization: 12345' -X POST http://127.0.0.1:8080/consulta -d '{ "citizenId": "0123A", "day": "31", "year": "91", "sn1": "AL", "sn2": "MA" }'
 
 ```json
 {"poblacion":"RUBÍ","distrito":"01","seccion":"001","mesa":"A","colele":"ESCOLA RAMON LLULL","dircol":"AV FLORS 43","errorMessage":""}
@@ -197,7 +247,9 @@ The format will look like this:
 ```json
 {"errorMessage":"[day year sn2]"}
 ```
-  This indicates every possible field that could be used to get a single record
+  This indicates every possible field that could be used to get a single record. The list is ordered from most to least useful: first the fields that settle the polling table on their own, then those leaving the fewest tables and, on a tie, the easiest to answer (day, year, first surname, second surname, first name, postal code). Ask the citizen for the first one; if they do not know it, the next. Fields that do not help tell the tables apart are left out, and `[colele]` means no data the citizen can give will break the tie. If every matching record votes at the same table, that table is returned without asking for more data.
+
+  Requests are normalised like the import, so either the reduced or the full value may be sent: `"citizenId": "12345678-A"` equals `"5678A"`, `"sn1": "Álvarez"` equals `"AL"`, `"day": "5"` equals `"05"` and `"year": "1991"` equals `"91"`. Names are compared without accents. Fields that are not indexed are ignored. Every error is returned with status 200 and `errorMessage` (MessageBird integration), except a wrong token (403) and the service still loading (503).
 
 ![Running](docs/images/image003.png)
 
@@ -206,19 +258,64 @@ The format will look like this:
 
 A docker-compose.yml is also provided to build and launch the service. Remember to change the TOKEN, the path to the folder storing the CSV and the database add enable HTTPS to ensure secure communications.
 
-In case the system detects a collision, the process will abort import. You can control what is indexed with the following environment variables:
+If two citizens with the same key vote at different tables (a collision) the import is aborted, the number of collisions is reported and both the CSV and the previous database are kept. Duplicates voting at the same table are harmless and ignored. On a collision, enable more tie-breaking fields (SN2, POST_CODE, FN, YEAR...) rather than raising DOCUMENT_CHARS, which stores more of the document.
 
-- DOCUMENT_CHARS (default=5): how many characters to extract from the CitizenID
+You can control what is indexed with the following environment variables (an invalid value stops the service):
+
+- TOKEN (required): value of the `Authorization` header (`Bearer <token>` is accepted too)
+- DOCUMENT_CHARS (default=5): how many characters to extract from the CitizenID. 0 stores the whole document
 - NAME_CHARS (default=2): define the number of characters to index for the firstname or the surnames
-- FIRST_CHARS=true (default=false): read the CitizenId from the beginning (true) of from the end (false)
-- FIRST_CHARS_ADD_LETTER=true (default=false): if we should append the letter at the end of the CitizenID to the string
-- DAY=true (default=true): enable dd
+- FIRST_CHARS=true (default=false): read the CitizenId from the beginning (true) or from the end (false)
+- FIRST_CHARS_ADD_LETTER=true (default=false): with FIRST_CHARS, append the letter at the end of the CitizenID
+- DAY=true (default=false): enable dd
 - YEAR=true (default=false): enable yy
 - FN=true (default=false): enable firstname
 - SN1=true (default=false): enable lastname1
 - SN2=true (default=false): enable lastname2
+- POST_CODE=true (default=false): enable the postal code (CPOSTAM column)
+- TIMEZONE (default=UTC), PORT (default=8080), DATA_DIR (default=/data)
 
-If you want to update the database, just copy the new CSV under /data and restart/delete the container.
+If you want to update the database, just copy the new CSV under /data and restart/delete the container. A database built by a release older than 2 cannot be served: load the CSV again.
+
+## Web client
+
+[consulta-censo-electoral-web-client](https://github.com/videoatencion/consulta-censo-electoral-web-client) is a web app (React SPA) for any citizen to look up where they vote. It asks for the DNI/NIE and, when a tie must be broken, only the next useful question (it follows the order of the field list described above). The entity name, logo, help contact and the link to the census complaint procedure are set in a `config.json`.
+
+The web app does not talk to this microservice directly: it is served by an nginx that proxies the requests and adds the `TOKEN`, so the token never reaches the browser. This microservice must therefore not be exposed to the Internet; only the `web` service is:
+
+```yaml
+services:
+  censo:
+    image: harbor.videoatencion.com/library/censo-electoral:latest
+    restart: unless-stopped
+    environment:
+      TOKEN: ${TOKEN:?}
+      DAY: "true"
+      YEAR: "true"
+      SN1: "true"
+      SN2: "true"
+      POST_CODE: "true"
+    volumes:
+      - ./data:/data
+
+  web:
+    build: https://github.com/videoatencion/consulta-censo-electoral-web-client.git
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://censo:8080
+      BACKEND_TOKEN: ${TOKEN:?}
+    volumes:
+      - ./config.json:/usr/share/nginx/html/config.json:ro
+      - ./logo.svg:/usr/share/nginx/html/logo.svg:ro
+    ports:
+      - "8080:8080"
+```
+
+```shell
+TOKEN=$(openssl rand -hex 32) docker compose up -d
+```
+
+See the web client README for the `config.json` format, rate limiting and deployment behind a load balancer.
 
 **If you need help, contact us at hola at videoatencion.com.**
 

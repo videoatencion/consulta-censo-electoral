@@ -1,13 +1,13 @@
-version: '3.9'
-
 services:
   censo:
     #    build: .
     image: harbor.videoatencion.com/library/censo-electoral:latest
+    restart: unless-stopped
     environment:
       - TOKEN=12345
-      - GOMAXPROCS=20
+      - TIMEZONE=Europe/Madrid
       - DOCUMENT_CHARS=5
+      - DAY=true
     volumes:
       - /path/to/my/data:/data
     ports:

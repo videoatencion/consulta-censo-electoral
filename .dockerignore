@@ -1,0 +1,5 @@
+.git
+docs
+*.db
+*.csv
+*.txt

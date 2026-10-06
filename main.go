@@ -2,712 +2,170 @@
 package main
 
 import (
+	"context"
+	"crypto/subtle"
 	"database/sql"
-	"encoding/csv"
-	"fmt"
-	"io"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
-	"path/filepath"
-	"sync"
-	"sort"
-	"strconv"
-	"unicode/utf8"
+	_ "time/tzdata"
 
 	"github.com/gin-gonic/gin"
-	_ "github.com/mattn/go-sqlite3"
-	"golang.org/x/text/encoding/charmap"
 )
 
-var location *time.Location
-var timeFormat string
-var db *sql.DB
-var dbReady = false
-var dbReadyMutex sync.Mutex
-
-type CitizenInfo struct {
-	Poblacion    string `json:"poblacion"`
-	Distrito     string `json:"distrito"`
-	Seccion      string `json:"seccion"`
-	Mesa         string `json:"mesa"`
-	Colele       string `json:"colele"`
-	Dircol       string `json:"dircol"`
-	PostCode     string `json:"postCode"`
-	ErrorMessage string `json:"errorMessage"`
-}
-
-type CitizenKey struct {
-	CitizenID    string
-	Day          string
-	Year         string
-	Fn           string
-	Sn1          string
-	Sn2          string
-	PostCode     string
-	Colele       string
-}
+const timeFormat = "02/Jan/2006:15:04:05 -0700"
 
 type RequestData struct {
-	CitizenID    string `json:"citizenId" binding:"required"`
-	Day          string `json:"day"`
-	Year         string `json:"year"`
-	Fn           string `json:"fn"`
-	Sn1          string `json:"sn1"`
-	Sn2          string `json:"sn2"`
-	PostCode     string `json:"postCode`
-	Colele       string `json:"colele`
+	CitizenID string `json:"citizenId" binding:"required"`
+	Day       string `json:"day"`
+	Year      string `json:"year"`
+	Fn        string `json:"fn"`
+	Sn1       string `json:"sn1"`
+	Sn2       string `json:"sn2"`
+	PostCode  string `json:"postCode"`
+	Colele    string `json:"colele"`
 }
-
-type CitizenResults struct {
-	CitizenID    string
-	Day          string
-	Year         string
-	Fn           string
-	Sn1          string
-	Sn2          string
-	PostCode     string
-	Colele       string
-	Poblacion    string
-	Distrito     string
-	Seccion      string
-	Mesa         string
-	Dircol       string
-}
-
-type ComboResult struct {
-	Combo      []string
-	Percentage float64
-}
-
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(healthcheck())
+	}
 
-	files, err := os.ReadDir("/data")
+	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatalf("Error reading data directory: %v", err)
+		log.Fatalf("Configuration error: %v", err)
 	}
 
-	var csvFilePath, dbFilePath string
-
-	for _, file := range files {
-		if strings.ToLower(filepath.Ext(file.Name())) == ".csv" || strings.ToLower(filepath.Ext(file.Name())) == ".txt" {
-			csvFilePath = filepath.Join("/data", file.Name())
-		} else if strings.ToLower(filepath.Ext(file.Name())) == ".db" {
-			dbFilePath = filepath.Join("/data", file.Name())
+	// The HTTP server starts right away so /health can report 503 while a
+	// large census is still being imported.
+	var db atomic.Pointer[sql.DB]
+	srv := &http.Server{
+		Addr:              ":" + cfg.Port,
+		Handler:           newRouter(cfg, &db),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	go func() {
+		log.Printf("Listening on %s", srv.Addr)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("HTTP server error: %v", err)
 		}
-	}
+	}()
 
-	if dbFilePath == "" && csvFilePath == "" {
-		log.Fatalf("No database or CSV file found in the data directory")
-	}
-
-	if dbFilePath == "" {
-		dbFilePath = "/data/citizens.db"
-	}
-
-	if csvFilePath != "" {
-		// Check if the DB file exists
-		if _, err := os.Stat(dbFilePath); err == nil {
-			// Delete the DB file
-			err = os.Remove(dbFilePath)
-			if err != nil {
-				fmt.Errorf("Error deleting DB file: %v", err)
-				return
-			}
-		}
-		db, err = initDB(dbFilePath) // Assign the returned *sql.DB to the global db variable
-
+	go func() {
+		d, err := prepareDatabase(cfg)
 		if err != nil {
-			log.Fatalf("Error initializing database: %v", err)
+			log.Fatalf("Error preparing database: %v", err)
 		}
-		defer db.Close()
+		db.Store(d)
+		log.Printf("Database ready")
+	}()
 
-		log.Println("Detected CSV file. Starting to parse...")
-		start := time.Now()
-		err = loadCitizens(csvFilePath, dbFilePath)
-		if err != nil {
-			log.Fatalf("Error loading citizens from CSV: %v", err)
-		}
-		log.Printf("Citizens loaded in %v\n", time.Since(start))
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	<-stop
 
-		if _, err := os.Stat(csvFilePath); err == nil {
-			err = os.Remove(csvFilePath)
-			if err != nil {
-				log.Printf("Error removing CSV file: %v", err)
-			}
-		}
-	} else {
-
-		db, err = initDB(dbFilePath) // Assign the returned *sql.DB to the global db variable
-
-		if err != nil {
-			log.Fatalf("Error initializing database: %v", err)
-		}
-		defer db.Close()
-
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("HTTP shutdown error: %v", err)
 	}
-
-	dbReadyMutex.Lock()
-	dbReady = true
-	dbReadyMutex.Unlock()
-
-	r := gin.New()
-	r.Use(customLogger(), TokenAuthMiddleware(), gin.Recovery())
-
-	r.POST("/consulta", func(c *gin.Context) {
-		var requestData RequestData
-		if err := c.ShouldBindJSON(&requestData); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-	   
-		citizenID := strings.ToUpper(requestData.CitizenID)
-		day := requestData.Day
-		year := requestData.Year
-		fn := strings.ToUpper(requestData.Fn)
-		sn1 := strings.ToUpper(requestData.Sn1)
-		sn2 := strings.ToUpper(requestData.Sn2)
-		postCode := strings.ToUpper(requestData.PostCode)
-		colele := strings.ToUpper(requestData.Colele)
- 
-		// Fix day with just 1 char
-		if len(day) == 1 {
-			day = "0" + day
-		}
-  
-		key := CitizenKey{
-			CitizenID: citizenID,
-			Day:	   day,
-			Year:	   year,
-			Fn:        fn,
-			Sn1:	   sn1,
-			Sn2:	   sn2,
-			PostCode:  postCode,
-			Colele:    colele,
-		}
-		
-		citizenInfo, numResults, err := getCitizenFromDB(key)
-//		fmt.Printf("%+v\n", citizenInfo)
-		if err != nil {
-//			c.JSON(http.StatusInternalServerError, gin.H{"errorMessage": err.Error()})
-			c.JSON(http.StatusOK, gin.H{"errorMessage": err.Error()})
-			return
-		}
-		
-		if numResults > 1 {
-//			c.JSON(http.StatusBadRequest, gin.H{"errorMessage": err})
-			c.JSON(http.StatusOK, gin.H{"errorMessage": err})
-			return
-		}
-		
-		c.JSON(http.StatusOK, citizenInfo)
-	})
-
-	r.Run()
-
-}
-
-
-func isDBReady() bool {
-	dbReadyMutex.Lock()
-	defer dbReadyMutex.Unlock()
-	return dbReady
-}
-
-func loadCitizens(filePath, dbPath string) (error) {
-	// Initialize the database
-	db, err := initDB(dbPath)
-
-	if err != nil {
-		return err
-	}
-
-	if db == nil {
-		return nil
-	}
-
-	// Check if the CSV file exists
-	if _, err := os.Stat(filePath); err == nil {
-		err = loadCitizensFromCSV(filePath)
-		if err != nil {
-			return err
-		}
-
-		// Delete the CSV file
-		err = os.Remove(filePath)
-		if err != nil {
-			return fmt.Errorf("Error deleting CSV file: %v", err)
-		}
-	}
-
-	// Show statistics on screen
-	results, err := calculateUniquePercentages(db)
-	if err != nil {
-		log.Fatalf("Error calculating unique percentages: %v\n", err)
-	}
-	printResults(results)	
-
-	return nil
-}
-
-func calculateUniquePercentages(db *sql.DB) ([]ComboResult, error) {
-	combinations := [][]string{
-		{},
-		{"day"},
-		{"year"},
-		{"fn"},
-		{"sn1"},
-		{"sn2"},
-		{"postCode"},
-		{"colele"},
-	}
-
-	uniqueCounts := make(map[string]int)
-	for _, combo := range combinations {
-		fields := append([]string{"citizen_id"}, combo...)
-		query := fmt.Sprintf("SELECT DISTINCT %s FROM citizens", strings.Join(fields, ", "))
-		rows, err := db.Query(query)
-		if err != nil {
-			return nil, err
-		}
-
-		count := 0
-		for rows.Next() {
-			count++
-		}
-		uniqueCounts[strings.Join(combo, "")] = count
-	}
-
-	var totalRows int
-	err := db.QueryRow("SELECT COUNT(*) FROM citizens").Scan(&totalRows)
-	if err != nil {
-		return nil, err
-	}
-
-	results := make([]ComboResult, 0, len(combinations))
-	for _, combo := range combinations {
-		count := uniqueCounts[strings.Join(combo, "")]
-		percentage := float64(count) / float64(totalRows) * 100.0
-		results = append(results, ComboResult{Combo: combo, Percentage: percentage})
-	}
-
-	return results, nil
-}
-
-func printResults(results []ComboResult) {
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Percentage > results[j].Percentage
-	})
-
-	for _, result := range results {
-		var fields string
-		if len(result.Combo) > 0 {
-			fields = "citizen_id+" + strings.Join(result.Combo, "+")
-		} else {
-			fields = "citizen_id"
-		}
-		log.Printf("%s = %.2f%%\n", fields, result.Percentage)
+	if d := db.Load(); d != nil {
+		d.Close()
 	}
 }
 
-func initDB(dbPath string) (*sql.DB, error) {
-	var err error
-	db, err := sql.Open("sqlite3", dbPath)
-
-	if err != nil {
-		return nil, fmt.Errorf("Error opening database: %v", err)
-	}
-
-	createCitizensTableQuery := `
-		CREATE TABLE IF NOT EXISTS citizens (
-			citizen_id TEXT NOT NULL,
-			day TEXT NOT NULL,
-			year TEXT NOT NULL,
-			fn TEXT NOT NULL,
-			sn1 TEXT NOT NULL,
-			sn2 TEXT NOT NULL,
-			postCode TEXT NOT NULL,
-			colele TEXT NOT NULL,
-			distrito TEXT NOT NULL,
-			seccion TEXT NOT NULL,
-			mesa TEXT NOT NULL,
-			PRIMARY KEY (citizen_id, day, year, fn, sn1, sn2),
-			FOREIGN KEY (colele) REFERENCES polling_stations (id)
-		)
-	`
-	createPollingStationsTableQuery := `
-		CREATE TABLE IF NOT EXISTS polling_stations (
-			id TEXT PRIMARY KEY,
-			poblacion TEXT,
-			dircol TEXT
-		)
-	`
-
-	_, err = db.Exec(createCitizensTableQuery)
-	if err != nil {
-		return nil, fmt.Errorf("Error creating citizens table: %v", err)
-
-	}
-
-	_, err = db.Exec(createPollingStationsTableQuery)
-	if err != nil {
-		return nil, fmt.Errorf("Error creating polling stations table: %v", err)
-	}
-
-	return db, nil
-
-}
-
-func loadCitizensFromCSV(filePath string) error {
-
-	nameChars := 2
-	if envNameChars, _ := strconv.ParseInt(os.Getenv("NAME_CHARS"), 10, 8); envNameChars >= 1 {
-			nameChars = int(envNameChars)
-	}
-   
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("Error opening file: %v", err)
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-	reader.Comma = ';'
-	reader.FieldsPerRecord = -1
-
-	decoder := charmap.ISO8859_1.NewDecoder()
-
-	// Read and discard the header line
-	_, err = reader.Read()
-	if err != nil {
-		return fmt.Errorf("Error reading CSV header: %v", err)
-	}
-
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("Error starting transaction: %v", err)
-	}
-	defer tx.Rollback()
-
-	insertCitizenStmt, err := tx.Prepare(`INSERT INTO citizens (citizen_id, day, year, fn, sn1, sn2, postCode, colele, distrito, seccion, mesa) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return fmt.Errorf("Error preparing citizen insert statement: %v", err)
-	}
-	defer insertCitizenStmt.Close()
-
-	insertPollingStationStmt, err := tx.Prepare(`INSERT OR IGNORE INTO polling_stations (id, poblacion, dircol) VALUES (?, ?, ?)`)
-	if err != nil {
-		return fmt.Errorf("Error preparing polling station insert statement: %v", err)
-	}
-	defer insertPollingStationStmt.Close()
-
-	var rowsRead, rowsImported int
-	//var day, year, sn1, sn2 string
-
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-
-		if err != nil {
-			return fmt.Errorf("Error reading CSV file: %v", err)
-		}
-
-		rowsRead++
-
-		if record[27] == "" || record[25] == "" {
-			log.Printf("Empty record: %s - %s\n", record[25], record[27])
-			continue
-		}
-
-		citizenID := strings.ToUpper(record[27])
-		birthdate := record[25]
-		dircol := strings.Join([]string{record[9], record[10], record[11], record[12]}, " ")
-
-		// Shall we get a substring of CitizenID?
-		if envDocumentChars, _ := strconv.ParseInt(os.Getenv("DOCUMENT_CHARS"), 10, 8); envDocumentChars >= 3 {
-			// Store only N characters of the citizenID. FIRST==true; default last
-			if envFirst, _ := strconv.ParseBool(os.Getenv("FIRST_CHARS")); envFirst == true {
-				if envLetter, _ := strconv.ParseBool(os.Getenv("FIRST_CHARS_ADD_LETTER")); envLetter == true {
-					citizenID = citizenID[:envDocumentChars]+citizenID[len(citizenID)-1:]
-				} else {
-					citizenID = citizenID[:envDocumentChars]
-			}
-			} else {
-				citizenID = citizenID[len(citizenID)-int(envDocumentChars):]
-			}
-		} else if envDocumentChars == 0 {
-			
-		} else {
-			return fmt.Errorf("Error, documentChars is smaller than 3, aborting ")
-
-		}
-
-		// Additional indexes will be empty if not enabled in the environment
-		fn := ""
-		if envFn, _ := strconv.ParseBool(os.Getenv("FN")); envFn == true {
-			fnDecoded, _ := decoder.String(record[13])
-			fn = fnDecoded
-			if len(fn) > nameChars {
-				fn = truncateUTF8String(fn, nameChars)
-			}
-		}
-
-		sn1 := ""
-		if envSn1, _ := strconv.ParseBool(os.Getenv("SN1")); envSn1 == true {
-			sn1Decoded, _ := decoder.String(record[14])
-			sn1 = sn1Decoded
-			if len(sn1) >= nameChars  {
-				sn1 = truncateUTF8String(sn1, nameChars)
-			}
-		}
-
-		sn2 := ""
-		if envSn2, _ := strconv.ParseBool(os.Getenv("SN2")); envSn2 == true {
-			sn2Decoded, _ := decoder.String(record[15])
-			sn2 = sn2Decoded
-			if len(sn2) > nameChars {
-				sn2 = truncateUTF8String(sn2, nameChars)
-			}
-		}
-
-		day := ""
-		if envDay, _ := strconv.ParseBool(os.Getenv("DAY")); envDay == true {
-			day = birthdate[:2]
-		}
-
-		year := ""
-		if envYear, _ := strconv.ParseBool(os.Getenv("YEAR")); envYear == true {
-			year = birthdate[len(birthdate)-2:]
-		}
-
-		postCode := ""
-		if envPostCode, _ := strconv.ParseBool(os.Getenv("POST_CODE")); envPostCode == true {
-			postCode = record[28]
-		}
-
-		lmun, _ := decoder.String(record[2])
-		dist := record[3]
-		secc := record[4]
-		mesa := record[5]
-		nlocal, _ := decoder.String(record[6])
-
-		_, err = insertCitizenStmt.Exec(citizenID, day, year, fn, sn1, sn2, postCode, nlocal, dist, secc, mesa)
-		if err != nil {
-			return fmt.Errorf("Error inserting citizen: %v - %v - %v - %v - %v - %v - %v - %v - %v - %v - %v", err, citizenID, day, year, fn, sn1, sn2, postCode, dist, secc, mesa)
-		}
-		rowsImported++
-
-//	        log.Printf("Decoded record: %s - %s - %s\n", fn, sn1, sn2)
-
-		_, err = insertPollingStationStmt.Exec(nlocal, lmun, strings.TrimSpace(dircol))
-		if err != nil {
-			return fmt.Errorf("Error inserting polling station: %v", err)
-		}
-	}
-
-	err = tx.Commit()
-	if err != nil {
-		return fmt.Errorf("Error committing transaction: %v", err)
-	}
-
-	log.Printf("CSV import process: %d rows read, %d rows imported\n", rowsRead, rowsImported)
-	return nil
-}
-
-
-func getCitizenFromDB(key CitizenKey) (CitizenInfo, int, error) {
-	var citizenInfo CitizenInfo
-	var results[] CitizenResults
-
-	query := `
-		SELECT
-			c.citizen_id, c.day, c.year, c.fn, c.sn1, c.sn2, c.postCode, c.colele, c.distrito, c.seccion, c.mesa, p.poblacion, p.dircol
-		FROM
-			citizens c
-			JOIN polling_stations p ON c.colele = p.id
-		WHERE
-			c.citizen_id = ?`
-
-	args := []interface{}{key.CitizenID}
-
-	if key.Day != "" {
-		query += " AND c.day = ?"
-		args = append(args, key.Day)
-	}
-	if key.Year != "" {
-		query += " AND c.year = ?"
-		args = append(args, key.Year)
-	}
-	if key.Fn != "" {
-		query += " AND c.fn = ?"
-		args = append(args, key.Fn)
-	}
-	if key.Sn1 != "" {
-		query += " AND c.sn1 = ?"
-		args = append(args, key.Sn1)
-	}
-	if key.Sn2 != "" {
-		query += " AND c.sn2 = ?"
-		args = append(args, key.Sn2)
-	}
-	if key.PostCode != "" {
-		query += " AND c.postCode = ?"
-		args = append(args, key.PostCode)
-	}
-	if key.Colele != "" {
-		query += " AND c.colele = ?"
-		args = append(args, key.Colele)
-	}
-
-	rows, err := db.Query(query, args...)
-	if err != nil {
-		return citizenInfo, 0, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var result CitizenResults
-		err = rows.Scan(&result.CitizenID, &result.Day, &result.Year, &result.Fn, &result.Sn1, &result.Sn2,
-						&result.PostCode, &result.Colele, &result.Distrito, &result.Seccion, &result.Mesa,
-						&result.Poblacion, &result.Dircol)
-		if err != nil {
-			return CitizenInfo{}, 0, err
-		}
-		results = append(results, result)
-	}
-
-	if len(results) == 1 {
-		citizenInfo := CitizenInfo{
-			Poblacion: results[0].Poblacion,
-			Distrito:  results[0].Distrito,
-			Seccion:   results[0].Seccion,
-			Mesa:      results[0].Mesa,
-			Colele:    results[0].Colele,
-			Dircol:    results[0].Dircol,
-			PostCode:  results[0].PostCode,
-		}
-
-		return citizenInfo, 1, nil  // Return the single filled CitizenInfo
-
-	} else if len(results) > 1 {
-		var citizenKeys []CitizenKey
-		for _, info := range results {
-			citizenKey := CitizenKey{
-				CitizenID: info.CitizenID,
-				Day:       info.Day,
-				Year:      info.Year,
-				Fn:        info.Fn,
-				Sn1:       info.Sn1,
-				Sn2:       info.Sn2,
-				PostCode:  info.PostCode,
-				Colele:    info.Colele,
-			}
-			citizenKeys = append(citizenKeys, citizenKey)
-		}
-                diffFields := findDifferingFieldsCitizens(citizenKeys)
-                return CitizenInfo{}, len(results), fmt.Errorf("%v", diffFields)
-	}
-
-	return CitizenInfo{}, 0, fmt.Errorf("no records found")
-
-}
-
-func findDifferingFieldsCitizens(results []CitizenKey) []string {
-
-	if len(results) < 2 {
-		return nil
-	}
-
-	differingFields := []string{}
-	first := results[0]
-	for _, result := range results[1:] {
-		if first.CitizenID != result.CitizenID && !contains(differingFields, "citizen_id") {
-			differingFields = append(differingFields, "citizen_id")
-		}
-		if first.Day != result.Day && !contains(differingFields, "day") {
-			differingFields = append(differingFields, "day")
-		}
-		if first.Year != result.Year && !contains(differingFields, "year") {
-			differingFields = append(differingFields, "year")
-		}
-		if first.Fn != result.Fn && !contains(differingFields, "fn") {
-			differingFields = append(differingFields, "fn")
-		}
-		if first.Sn1 != result.Sn1 && !contains(differingFields, "sn1") {
-			differingFields = append(differingFields, "sn1")
-		}
-		if first.Sn2 != result.Sn2 && !contains(differingFields, "sn2") {
-			differingFields = append(differingFields, "sn2")
-		}
-		if first.PostCode != result.PostCode && !contains(differingFields, "postCode") {
-			differingFields = append(differingFields, "postCode")
-		}
-		if first.PostCode != result.PostCode && !contains(differingFields, "colele") {
-			differingFields = append(differingFields, "colele")
-		}
-	}
-
-	return differingFields
-}
-
-func contains(slice []string, value string) bool {
-	for _, item := range slice {
-		if item == value {
-			return true
-		}
-	}
-	return false
-}
-
-func init() {
+func newRouter(cfg Config, db *atomic.Pointer[sql.DB]) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
-
-	timezone := os.Getenv("TIMEZONE")
-	if timezone == "" {
-		timezone = "UTC"
-	}
-
-	var err error
-	location, err = time.LoadLocation(timezone)
-	if err != nil {
-		log.Fatalf("Error loading timezone: %v", err)
-	}
-
-	timeFormat = "02/Jan/2006:15:04:05 -0700"
-
 	r := gin.New()
-	r.Use(customLogger(), gin.Recovery())
+	r.Use(customLogger(cfg.Location), gin.Recovery())
+
 	r.GET("/health", func(c *gin.Context) {
-		if isDBReady() {
+		if db.Load() != nil {
 			c.Status(http.StatusOK)
 		} else {
 			c.Status(http.StatusServiceUnavailable)
 		}
 	})
+
+	// Errors are answered with 200 and an errorMessage so that chatbot
+	// platforms such as MessageBird can branch on the body.
+	r.POST("/consulta", TokenAuthMiddleware(cfg.Token), func(c *gin.Context) {
+		d := db.Load()
+		if d == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"errorMessage": "service loading"})
+			return
+		}
+
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+		var req RequestData
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusOK, gin.H{"errorMessage": "invalid request: " + err.Error()})
+			return
+		}
+
+		// Fields that are not indexed are stored empty, so filtering on them
+		// would never match: ignore them instead.
+		key := CitizenKey{
+			CitizenID: cfg.documentKey(req.CitizenID),
+			Colele:    strings.ToUpper(strings.TrimSpace(req.Colele)),
+		}
+		if cfg.Day {
+			key.Day = dayKey(req.Day)
+		}
+		if cfg.Year {
+			key.Year = yearKey(req.Year)
+		}
+		if cfg.Fn && req.Fn != "" {
+			key.Fn = cfg.nameKey(req.Fn)
+		}
+		if cfg.Sn1 && req.Sn1 != "" {
+			key.Sn1 = cfg.nameKey(req.Sn1)
+		}
+		if cfg.Sn2 && req.Sn2 != "" {
+			key.Sn2 = cfg.nameKey(req.Sn2)
+		}
+		if cfg.PostCode {
+			key.PostCode = strings.TrimSpace(req.PostCode)
+		}
+		if key.CitizenID == "" {
+			c.JSON(http.StatusOK, gin.H{"errorMessage": "invalid request: citizenId"})
+			return
+		}
+
+		info, err := lookupCitizen(d, key)
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{"errorMessage": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, info)
+	})
+
+	return r
 }
 
-func customLogger() gin.HandlerFunc {
+func customLogger(location *time.Location) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Next()
 
-		end := time.Now()
-		clientIP := c.ClientIP()
-		method := c.Request.Method
-		statusCode := c.Writer.Status()
-
-		log.Printf("%s - - [%s] \"%s %s %s\" %d %d \"%s\" \"%s\"\n",
-			clientIP,
-			end.In(location).Format(timeFormat),
-			method,
+		if c.Request.URL.Path == "/health" {
+			return
+		}
+		log.Printf("%s - - [%s] \"%s %s %s\" %d %d \"%s\" \"%s\"",
+			c.ClientIP(),
+			time.Now().In(location).Format(timeFormat),
+			c.Request.Method,
 			c.Request.URL.Path,
 			c.Request.Proto,
-			statusCode,
+			c.Writer.Status(),
 			c.Writer.Size(),
 			c.Request.Referer(),
 			c.Request.UserAgent(),
@@ -715,39 +173,27 @@ func customLogger() gin.HandlerFunc {
 	}
 }
 
-func TokenAuthMiddleware() gin.HandlerFunc {
+func TokenAuthMiddleware(envToken string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := c.Request.Header.Get("Authorization")
-		envToken := os.Getenv("TOKEN")
-
-		if token == "" || token != envToken {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-					"error": "Unauthorized",
-				})
-				return
+		token := strings.TrimPrefix(c.Request.Header.Get("Authorization"), "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(token), []byte(envToken)) != 1 {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "Unauthorized"})
+			return
 		}
-
 		c.Next()
 	}
 }
 
-
-func truncateUTF8String(s string, n int) string {
-    if utf8.RuneCountInString(s) <= n {
-        return s
-    }
-
-    truncated := make([]rune, n)
-    i := 0
-
-    for _, r := range s {
-        if i >= n {
-            break
-        }
-
-        truncated[i] = r
-        i++
-    }
-
-    return string(truncated)
+// healthcheck lets the distroless image, which has no curl, probe itself.
+func healthcheck() int {
+	client := http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://127.0.0.1:" + envString("PORT", "8080") + "/health")
+	if err != nil {
+		return 1
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 1
+	}
+	return 0
 }
