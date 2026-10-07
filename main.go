@@ -36,6 +36,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		os.Exit(healthcheck())
 	}
+	if len(os.Args) > 1 && os.Args[1] == "analizar" {
+		os.Exit(analyze(os.Args[2:], os.Stdout))
+	}
 
 	cfg, err := loadConfig()
 	if err != nil {
@@ -94,6 +97,16 @@ func newRouter(cfg Config, db *atomic.Pointer[sql.DB]) *gin.Engine {
 		} else {
 			c.Status(http.StatusServiceUnavailable)
 		}
+	})
+
+	// Which part of the identity document is indexed, so that clients ask the
+	// citizen for just that part and the whole document never leaves them.
+	r.GET("/formato", TokenAuthMiddleware(cfg.Token), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"documentChars": cfg.DocumentChars,
+			"firstChars":    cfg.FirstChars,
+			"addLetter":     cfg.FirstChars && cfg.FirstCharsAddLetter,
+		})
 	})
 
 	// Errors are answered with 200 and an errorMessage so that chatbot

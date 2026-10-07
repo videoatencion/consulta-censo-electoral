@@ -18,24 +18,32 @@ import (
 
 // documentKey reduces an identity document to the characters that are stored.
 func (cfg Config) documentKey(doc string) string {
-	doc = strings.Map(func(r rune) rune {
+	return reduceDocument(normalizeDocument(doc), cfg.DocumentChars, cfg.FirstChars, cfg.FirstChars && cfg.FirstCharsAddLetter)
+}
+
+// normalizeDocument uppercases and keeps only letters and digits.
+func normalizeDocument(doc string) string {
+	return strings.Map(func(r rune) rune {
 		r = unicode.ToUpper(r)
 		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
 			return r
 		}
 		return -1
 	}, doc)
+}
 
-	n := cfg.DocumentChars
+// reduceDocument keeps the n characters of a normalized document that are
+// indexed: the last ones, the first ones, or the first ones plus the letter.
+func reduceDocument(doc string, n int, first, addLetter bool) string {
 	switch {
 	case n == 0:
 		return doc
-	case cfg.FirstChars && cfg.FirstCharsAddLetter:
+	case first && addLetter:
 		if len(doc) <= n+1 {
 			return doc
 		}
 		return doc[:n] + doc[len(doc)-1:]
-	case cfg.FirstChars:
+	case first:
 		if len(doc) <= n {
 			return doc
 		}
@@ -50,12 +58,17 @@ func (cfg Config) documentKey(doc string) string {
 
 // nameKey uppercases, removes diacritics (À->A, Ç->C, Ñ->N) and truncates.
 func (cfg Config) nameKey(name string) string {
+	return truncateUTF8String(normalizeName(name), cfg.NameChars)
+}
+
+// normalizeName uppercases and removes diacritics, without truncating.
+func normalizeName(name string) string {
 	t := transform.Chain(norm.NFD, runes.Remove(runes.In(unicode.Mn)), norm.NFC)
 	s, _, err := transform.String(t, strings.TrimSpace(name))
 	if err != nil {
 		s = name
 	}
-	return truncateUTF8String(strings.ToUpper(s), cfg.NameChars)
+	return strings.ToUpper(s)
 }
 
 // dayKey returns the day of month with two digits ("5" -> "05").

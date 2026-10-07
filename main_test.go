@@ -247,3 +247,25 @@ func TestFindDifferingFieldsRanking(t *testing.T) {
 		t.Fatalf("got %s, want [colele]", got)
 	}
 }
+
+func TestFormato(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.FirstChars, cfg.FirstCharsAddLetter = true, true
+	var holder atomic.Pointer[sql.DB]
+	router := newRouter(cfg, &holder)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/formato", nil))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("without token = %d, want 403", w.Code)
+	}
+
+	// Answered even while the census is still loading.
+	req := httptest.NewRequest(http.MethodGet, "/formato", nil)
+	req.Header.Set("Authorization", "secret")
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Body.String() != `{"addLetter":true,"documentChars":5,"firstChars":true}` {
+		t.Fatalf("got %d %s", w.Code, w.Body)
+	}
+}

@@ -27,25 +27,10 @@ var columns = map[string]int{
 // prepareDatabase imports any census file found in the data directory, or
 // opens the database built by a previous run when there is none.
 func prepareDatabase(cfg Config) (*sql.DB, error) {
-	entries, err := os.ReadDir(cfg.DataDir)
+	csvFiles, dbFiles, err := listDataDir(cfg.DataDir)
 	if err != nil {
-		return nil, fmt.Errorf("reading data directory: %w", err)
+		return nil, err
 	}
-
-	var csvFiles, dbFiles []string
-	for _, e := range entries {
-		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		switch strings.ToLower(filepath.Ext(e.Name())) {
-		case ".csv", ".txt":
-			csvFiles = append(csvFiles, filepath.Join(cfg.DataDir, e.Name()))
-		case ".db":
-			dbFiles = append(dbFiles, filepath.Join(cfg.DataDir, e.Name()))
-		}
-	}
-	sort.Strings(csvFiles)
-	sort.Strings(dbFiles)
 
 	dbPath := filepath.Join(cfg.DataDir, "citizens.db")
 	if len(dbFiles) > 0 {
@@ -88,6 +73,69 @@ func prepareDatabase(cfg Config) (*sql.DB, error) {
 	}
 
 	return openStore(dbPath)
+}
+
+// listDataDir returns the census files and the databases in dir, sorted.
+func listDataDir(dir string) (csvFiles, dbFiles []string, err error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading data directory: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		switch strings.ToLower(filepath.Ext(e.Name())) {
+		case ".csv", ".txt":
+			csvFiles = append(csvFiles, filepath.Join(dir, e.Name()))
+		case ".db":
+			dbFiles = append(dbFiles, filepath.Join(dir, e.Name()))
+		}
+	}
+	sort.Strings(csvFiles)
+	sort.Strings(dbFiles)
+	return csvFiles, dbFiles, nil
+}
+
+// readCensus calls fn for every data row of an INE census file, with a getter
+// for the columns listed in columns. The record is reused between calls.
+func readCensus(path string, fn func(line int, field func(name string) string) error) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("opening file: %w", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(bufio.NewReaderSize(file, 1<<20))
+	reader.Comma = ';'
+	reader.FieldsPerRecord = -1
+	reader.LazyQuotes = true
+	reader.ReuseRecord = true
+
+	// Read and discard the header line
+	if _, err := reader.Read(); err != nil {
+		return fmt.Errorf("reading CSV header: %w", err)
+	}
+
+	var record []string
+	field := func(name string) string {
+		if i := columns[name]; i < len(record) {
+			return record[i]
+		}
+		return ""
+	}
+	for line := 2; ; line++ {
+		record, err = reader.Read()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("reading CSV file: %w", err)
+		}
+		if err := fn(line, field); err != nil {
+			return err
+		}
+	}
 }
 
 func buildDatabase(cfg Config, path string, csvFiles []string) error {
@@ -190,49 +238,16 @@ func (imp *importer) close() {
 }
 
 func (imp *importer) importFile(path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("opening file: %w", err)
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(bufio.NewReaderSize(file, 1<<20))
-	reader.Comma = ';'
-	reader.FieldsPerRecord = -1
-	reader.LazyQuotes = true
-	reader.ReuseRecord = true
-
-	// Read and discard the header line
-	if _, err := reader.Read(); err != nil {
-		return fmt.Errorf("reading CSV header: %w", err)
-	}
-
 	cfg := imp.cfg
 	needBirthdate := cfg.Day || cfg.Year
-	line := 1
 
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
-		line++
-		if err != nil {
-			return fmt.Errorf("reading CSV file: %w", err)
-		}
+	return readCensus(path, func(line int, field func(string) string) error {
 		imp.rowsRead++
-
-		field := func(name string) string {
-			if i := columns[name]; i < len(record) {
-				return record[i]
-			}
-			return ""
-		}
 
 		citizenID := cfg.documentKey(field("IDENT"))
 		if citizenID == "" {
 			imp.rowsSkipped++
-			continue
+			return nil
 		}
 
 		var day, year string
@@ -240,7 +255,7 @@ func (imp *importer) importFile(path string) error {
 			d, y, ok := birthdateKeys(field("FNAC"))
 			if !ok {
 				imp.rowsSkipped++
-				continue
+				return nil
 			}
 			if cfg.Day {
 				day = d
@@ -265,32 +280,19 @@ func (imp *importer) importFile(path string) error {
 			postCode = strings.TrimSpace(field("CPOSTAM"))
 		}
 
-		var dir []string
-		for _, c := range []string{"DIRMESA1", "DIRMESA2", "DIRMESA3", "DIRMESA4"} {
-			if v := decodeField(field(c)); v != "" {
-				dir = append(dir, v)
-			}
-		}
-		stationID, err := imp.station(stationKey{
-			poblacion: decodeField(field("LMUN")),
-			colele:    decodeField(field("NLOCAL")),
-			dircol:    strings.Join(dir, " "),
-		})
+		place := pollingPlaceOf(field)
+		stationID, err := imp.station(place.station)
 		if err != nil {
 			return err
 		}
 
-		dist := strings.TrimSpace(field("DIST"))
-		secc := strings.TrimSpace(field("SECC"))
-		mesa := strings.TrimSpace(field("MESA"))
-
-		res, err := imp.insCitizen.Exec(citizenID, day, year, fn, sn1, sn2, postCode, stationID, dist, secc, mesa)
+		res, err := imp.insCitizen.Exec(citizenID, day, year, fn, sn1, sn2, postCode, stationID, place.dist, place.secc, place.mesa)
 		if err != nil {
 			return fmt.Errorf("line %d: inserting citizen: %w", line, err)
 		}
 		if n, _ := res.RowsAffected(); n == 1 {
 			imp.rowsImported++
-			continue
+			return nil
 		}
 
 		// Another citizen already has this key. It is harmless if both vote
@@ -301,16 +303,41 @@ func (imp *importer) importFile(path string) error {
 		if err != nil {
 			return fmt.Errorf("line %d: checking duplicate: %w", line, err)
 		}
-		if prevStation == stationID && prevDist == dist && prevSecc == secc && prevMesa == mesa {
+		if prevStation == stationID && prevDist == place.dist && prevSecc == place.secc && prevMesa == place.mesa {
 			imp.duplicates++
-			continue
+			return nil
 		}
 		if imp.collisions == 0 {
 			imp.firstCollision = line
 		}
 		imp.collisions++
+		return nil
+	})
+}
+
+// pollingPlace identifies the table where a citizen votes.
+type pollingPlace struct {
+	station          stationKey
+	dist, secc, mesa string
+}
+
+func pollingPlaceOf(field func(string) string) pollingPlace {
+	var dir []string
+	for _, c := range []string{"DIRMESA1", "DIRMESA2", "DIRMESA3", "DIRMESA4"} {
+		if v := decodeField(field(c)); v != "" {
+			dir = append(dir, v)
+		}
 	}
-	return nil
+	return pollingPlace{
+		station: stationKey{
+			poblacion: decodeField(field("LMUN")),
+			colele:    decodeField(field("NLOCAL")),
+			dircol:    strings.Join(dir, " "),
+		},
+		dist: strings.TrimSpace(field("DIST")),
+		secc: strings.TrimSpace(field("SECC")),
+		mesa: strings.TrimSpace(field("MESA")),
+	}
 }
 
 func (imp *importer) station(k stationKey) (int64, error) {

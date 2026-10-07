@@ -51,7 +51,35 @@ RAM:                                16 MB
 
    docker build . -t censo:latest
 
-3) Ejecute el servicio:
+3) Analice el censo y elija qué indexar. **Indexe sólo la información mínima necesaria** (RGPD, minimización de datos): el comando `analizar` lee el censo sin importarlo ni borrarlo y propone las configuraciones mínimas que no producen colisiones, ordenadas de menos a más información personal guardada. Monte la carpeta en sólo lectura (`:ro`):
+
+```shell
+docker run --rm -v /ruta/al/directorio/del/censo:/data:ro harbor.videoatencion.com/library/censo-electoral:latest analizar
+```
+
+```
+Censo analizado: 20.000 ciudadanos que votan en 180 mesas.
+
+Opciones mínimas sin colisiones, de menos a más información personal guardada:
+
+ 1. Los últimos 5 caracteres del documento (4 cifras y la letra en un DNI), el día de nacimiento, la primera letra del primer apellido y el código postal.
+    DOCUMENT_CHARS=5 DAY=true SN1=true POST_CODE=true NAME_CHARS=1
+    Información guardada por ciudadano: unos 27 bits.
+    Sólo con el documento se resuelve el 91,6 % de los ciudadanos; el resto tendrá que responder alguna pregunta más.
+    Atención: 7 ciudadanos sin fecha de nacimiento válida quedarían fuera del índice.
+ ...
+```
+
+  Copie las variables de la opción elegida al arrancar el servicio (paso 4). Para elegir entre opciones parecidas:
+
+  - **Información guardada**: estimación de cuánto identifica lo que se guarda de cada ciudadano. Cada cifra del documento cuenta 3,3 bits, la letra del DNI 4,5, y cada campo de desempate lo que realmente distingue en *su* censo (un código postal dentro de un municipio dice poco; un año de nacimiento, bastante más).
+  - **Sólo con el documento**: cuántos ciudadanos encuentran su mesa sin que se les pregunte nada más. Al resto, la web o el chatbot les pide un dato de desempate cada vez.
+  - **Ciudadanos fuera del índice**: si la opción usa la fecha de nacimiento, quienes no la tienen en el censo no podrán consultar. Prefiera una opción sin fecha si son muchos.
+  - Por defecto se proponen hasta 3 campos de desempate y hasta 6 caracteres del documento, porque el DNI casi entero es un identificador directo. En municipios grandes puede necesitar más campos: `analizar -max-campos 5`. Use `analizar -h` para ver todas las opciones.
+
+  El análisis aplica exactamente las mismas reglas que la importación (los mismos recortes y la misma normalización de nombres) y sólo muestra cifras agregadas, nunca datos de ningún ciudadano. Un censo de 300.000 personas se analiza en unos 7 segundos.
+
+4) Ejecute el servicio:
 
     docker run -e TOKEN=12345 -v /ruta/al/directorio/del/censo:/data -p 8080:8080 -d censo:latest
       o
@@ -73,7 +101,7 @@ RAM:                                16 MB
   Aquí podemos ver que el proceso de importación ha funcionado sin colisiones, y el % de resoluciones que podemos esperar sólo consultando el documento de identidad o el documento y un campo adicional. Los 8 registros no importados han sido causados por filas con el campo del documento de identidad o la fecha de nacimiento vacías.
 
 
-4) Pruebe su servicio
+5) Pruebe su servicio
 
     curl -H 'Authorization: 12345' -X POST http://127.0.0.1:8080/consulta -d '{ "citizenId": "0123A", "day": "31", "year": "91", "sn1": "AL", "sn2": "MA" }'
 
@@ -89,6 +117,12 @@ RAM:                                16 MB
 
   El servicio aplica a la consulta la misma normalización que a la importación, así que se puede enviar el valor reducido o el completo: `"citizenId": "12345678-A"` equivale a `"5678A"`, `"sn1": "Álvarez"` a `"AL"`, `"day": "5"` a `"05"` y `"year": "1991"` a `"91"`. Los nombres se comparan sin acentos (À→A, Ç→C, Ñ→N). Los campos que no estén indexados se ignoran. Todos los errores se devuelven con código 200 y `errorMessage` (integración con MessageBird), excepto un token incorrecto (403) y el servicio todavía cargando (503).
 
+  Para que el ciudadano no tenga que enviar el documento entero, `GET /formato` (con la misma cabecera `Authorization`) indica qué parte se indexa, y así el cliente puede pedir sólo esa parte:
+
+```json
+{"documentChars":5,"firstChars":false,"addLetter":false}
+```
+
 ![Ejecutando](docs/images/image003.png)
 
 
@@ -96,7 +130,7 @@ RAM:                                16 MB
 
 También se proporciona un archivo docker-compose.yml para construir e iniciar el servicio. Recuerde cambiar el TOKEN, la ruta a la carpeta donde se almacena el CSV y la base de datos, además habilite HTTPS para garantizar comunicaciones seguras.
 
-Si dos ciudadanos con la misma clave votan en mesas distintas (colisión) la importación se aborta, se informa de cuántas colisiones hay y se conserva el CSV y la base de datos anterior. Los duplicados que votan en la misma mesa no son un problema y se ignoran. Ante una colisión, active más campos de desempate (SN2, POST_CODE, FN, YEAR...) en lugar de aumentar DOCUMENT_CHARS, que almacena más parte del documento. En un municipio grande, `DOCUMENT_CHARS=5` con `DAY`, `YEAR`, `SN1`, `SN2` y `POST_CODE` suele ser suficiente.
+Si dos ciudadanos con la misma clave votan en mesas distintas (colisión) la importación se aborta, se informa de cuántas colisiones hay y se conserva el CSV y la base de datos anterior. Los duplicados que votan en la misma mesa no son un problema y se ignoran. Para no llegar a una colisión, elija la configuración con `analizar` (paso 3 de «Empezando») antes de cargar el censo.
 
 Puede controlarse qué se indexa mediante las siguientes variables de entorno (un valor no válido detiene el servicio):
 
@@ -117,7 +151,7 @@ Si desea actualizar la base de datos, simplemente copie el nuevo CSV en /data y 
 
 ## Cliente web
 
-[consulta-censo-electoral-web](https://github.com/videoatencion/consulta-censo-electoral-web) es una web (SPA en React) para que cualquier ciudadano consulte dónde vota. Pide el DNI/NIE y, si hace falta desempatar, sólo la siguiente pregunta útil (usa el orden de la lista de campos descrito arriba). El nombre del ente, el logotipo, el contacto de ayuda y el enlace al trámite de reclamación del censo se configuran con un `config.json`.
+[consulta-censo-electoral-web](https://github.com/videoatencion/consulta-censo-electoral-web) es una web (SPA en React) para que cualquier ciudadano consulte dónde vota. Pide sólo la parte del DNI/NIE que se indexa (la que indica `GET /formato`; si el ciudadano lo escribe entero, se recorta en el navegador) y, si hace falta desempatar, sólo la siguiente pregunta útil (usa el orden de la lista de campos descrito arriba). El nombre del ente, el logotipo, el contacto de ayuda y el enlace al trámite de reclamación del censo se configuran con un `config.json`.
 
 La web no habla directamente con este microservicio: la sirve un nginx que hace de proxy y añade el `TOKEN`, de forma que el token nunca llega al navegador. Así, este microservicio no debe exponerse a Internet; sólo el servicio `web`:
 
@@ -214,7 +248,15 @@ The format will look like this:
 
     docker build . -t censo:latest
 
-3) Run your service:
+3) Analyze the census and choose what to index. **Index only the minimum information needed** (GDPR data minimization): the `analizar` command reads the census without importing or deleting it and proposes the minimal configurations that produce no collisions, from the least to the most personal information stored. Mount the folder read-only (`:ro`):
+
+```shell
+docker run --rm -v /path/to/census/folder:/data:ro harbor.videoatencion.com/library/censo-electoral:latest analizar
+```
+
+  Each option shows the environment variables to use in step 4, an estimate of the personal information stored per citizen (in bits: 3.3 per document digit, 4.5 for the DNI letter, and the real entropy of each tie-breaking field in *your* census), the share of citizens found with the document alone, and how many citizens would be left out for lacking a valid birthdate. By default it proposes up to 3 tie-breaking fields and up to 6 document characters, since a nearly complete DNI is a direct identifier; large municipalities may need `analizar -max-campos 5`. See `analizar -h`. The report only contains aggregated figures, never data about any citizen.
+
+4) Run your service:
 
     docker run -e TOKEN=12345 -v /path/to/census/folder:/data -p 8080:8080 -d censo:latest
       or
@@ -235,7 +277,7 @@ The format will look like this:
 
   Here we can see that the import process worked, and what % of resolutions can we expect with just the citizenId or citizenId + an optional field. The 8 rows not imported are caused by rows with citizenId or birthDate empty.
 
-4) Try your service:
+5) Try your service:
 
     curl -H 'Authorization: 12345' -X POST http://127.0.0.1:8080/consulta -d '{ "citizenId": "0123A", "day": "31", "year": "91", "sn1": "AL", "sn2": "MA" }'
 
@@ -251,6 +293,12 @@ The format will look like this:
 
   Requests are normalised like the import, so either the reduced or the full value may be sent: `"citizenId": "12345678-A"` equals `"5678A"`, `"sn1": "Álvarez"` equals `"AL"`, `"day": "5"` equals `"05"` and `"year": "1991"` equals `"91"`. Names are compared without accents. Fields that are not indexed are ignored. Every error is returned with status 200 and `errorMessage` (MessageBird integration), except a wrong token (403) and the service still loading (503).
 
+  So that the citizen does not have to send the whole document, `GET /formato` (with the same `Authorization` header) tells which part is indexed, so the client can ask for just that part:
+
+```json
+{"documentChars":5,"firstChars":false,"addLetter":false}
+```
+
 ![Running](docs/images/image003.png)
 
 
@@ -258,7 +306,7 @@ The format will look like this:
 
 A docker-compose.yml is also provided to build and launch the service. Remember to change the TOKEN, the path to the folder storing the CSV and the database add enable HTTPS to ensure secure communications.
 
-If two citizens with the same key vote at different tables (a collision) the import is aborted, the number of collisions is reported and both the CSV and the previous database are kept. Duplicates voting at the same table are harmless and ignored. On a collision, enable more tie-breaking fields (SN2, POST_CODE, FN, YEAR...) rather than raising DOCUMENT_CHARS, which stores more of the document.
+If two citizens with the same key vote at different tables (a collision) the import is aborted, the number of collisions is reported and both the CSV and the previous database are kept. Duplicates voting at the same table are harmless and ignored. To avoid collisions, choose the configuration with `analizar` (step 3 of "Getting started") before loading the census.
 
 You can control what is indexed with the following environment variables (an invalid value stops the service):
 
@@ -279,7 +327,7 @@ If you want to update the database, just copy the new CSV under /data and restar
 
 ## Web client
 
-[consulta-censo-electoral-web](https://github.com/videoatencion/consulta-censo-electoral-web) is a web app (React SPA) for any citizen to look up where they vote. It asks for the DNI/NIE and, when a tie must be broken, only the next useful question (it follows the order of the field list described above). The entity name, logo, help contact and the link to the census complaint procedure are set in a `config.json`.
+[consulta-censo-electoral-web](https://github.com/videoatencion/consulta-censo-electoral-web) is a web app (React SPA) for any citizen to look up where they vote. It asks only for the indexed part of the DNI/NIE (as given by `GET /formato`; if the citizen types it whole, it is cut in the browser) and, when a tie must be broken, only the next useful question (it follows the order of the field list described above). The entity name, logo, help contact and the link to the census complaint procedure are set in a `config.json`.
 
 The web app does not talk to this microservice directly: it is served by an nginx that proxies the requests and adds the `TOKEN`, so the token never reaches the browser. This microservice must therefore not be exposed to the Internet; only the `web` service is:
 
