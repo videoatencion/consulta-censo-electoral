@@ -145,6 +145,7 @@ Puede controlarse qué se indexa mediante las siguientes variables de entorno (u
 - SN1=true (default=false): activa apellido1
 - SN2=true (default=false): activa apellido2
 - POST_CODE=true (default=false): activa el código postal (columna CPOSTAM)
+- DEBUG_IMPORT=true (default=false): muestra en el log las líneas del CSV que no se importan (documento vacío o fecha de nacimiento no válida). Imprime datos personales: úselo solo para diagnosticar
 - TIMEZONE (default=UTC), PORT (default=8080), DATA_DIR (default=/data)
 
 Si desea actualizar la base de datos, simplemente copie el nuevo CSV en /data y reinicie/elimine el contenedor. Una base de datos creada por una versión anterior a la 2 no se puede servir: hay que volver a cargar el CSV.
@@ -321,6 +322,7 @@ You can control what is indexed with the following environment variables (an inv
 - SN1=true (default=false): enable lastname1
 - SN2=true (default=false): enable lastname2
 - POST_CODE=true (default=false): enable the postal code (CPOSTAM column)
+- DEBUG_IMPORT=true (default=false): log the CSV lines that are not imported (empty document or invalid birthdate). It prints personal data: use it only to diagnose
 - TIMEZONE (default=UTC), PORT (default=8080), DATA_DIR (default=/data)
 
 If you want to update the database, just copy the new CSV under /data and restart/delete the container. A database built by a release older than 2 cannot be served: load the CSV again.

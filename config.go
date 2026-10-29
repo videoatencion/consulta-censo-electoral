@@ -18,6 +18,9 @@ type Config struct {
 	Token    string
 	Location *time.Location
 
+	// DebugImport logs every skipped census row. It prints personal data.
+	DebugImport bool
+
 	// Indexing options. They decide which (partial) personal data is stored,
 	// so the defaults are the most privacy preserving ones.
 	DocumentChars       int // 0 keeps the whole document
@@ -73,6 +76,7 @@ func loadConfig() (Config, error) {
 		{"SN1", &cfg.Sn1},
 		{"SN2", &cfg.Sn2},
 		{"POST_CODE", &cfg.PostCode},
+		{"DEBUG_IMPORT", &cfg.DebugImport},
 	}
 	for _, b := range bools {
 		if *b.dst, err = envBool(b.name, false); err != nil {

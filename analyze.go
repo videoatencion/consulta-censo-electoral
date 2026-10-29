@@ -112,7 +112,7 @@ func loadCensus(files []string) (*census, error) {
 	}
 
 	for _, path := range files {
-		err := readCensus(path, func(line int, field func(string) string) error {
+		err := readCensus(path, func(line int, _ []string, field func(string) string) error {
 			doc := normalizeDocument(field("IDENT"))
 			if doc == "" {
 				c.noDocRows++

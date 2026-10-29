@@ -97,9 +97,10 @@ func listDataDir(dir string) (csvFiles, dbFiles []string, err error) {
 	return csvFiles, dbFiles, nil
 }
 
-// readCensus calls fn for every data row of an INE census file, with a getter
-// for the columns listed in columns. The record is reused between calls.
-func readCensus(path string, fn func(line int, field func(name string) string) error) error {
+// readCensus calls fn for every data row of an INE census file, with the raw
+// record and a getter for the columns listed in columns. The record is reused
+// between calls.
+func readCensus(path string, fn func(line int, record []string, field func(name string) string) error) error {
 	file, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("opening file: %w", err)
@@ -132,7 +133,7 @@ func readCensus(path string, fn func(line int, field func(name string) string) e
 		if err != nil {
 			return fmt.Errorf("reading CSV file: %w", err)
 		}
-		if err := fn(line, field); err != nil {
+		if err := fn(line, record, field); err != nil {
 			return err
 		}
 	}
@@ -169,7 +170,7 @@ func buildDatabase(cfg Config, path string, csvFiles []string) error {
 		}
 	}
 
-	log.Printf("CSV import process: %d rows read, %d rows imported, %d skipped (empty document or birthdate), %d duplicates with the same polling table",
+	log.Printf("CSV import process: %d rows read, %d rows imported, %d skipped (empty document or birthdate, DEBUG_IMPORT=true lists them), %d duplicates with the same polling table",
 		imp.rowsRead, imp.rowsImported, imp.rowsSkipped, imp.duplicates)
 
 	if imp.collisions > 0 {
@@ -241,21 +242,26 @@ func (imp *importer) importFile(path string) error {
 	cfg := imp.cfg
 	needBirthdate := cfg.Day || cfg.Year
 
-	return readCensus(path, func(line int, field func(string) string) error {
+	return readCensus(path, func(line int, record []string, field func(string) string) error {
 		imp.rowsRead++
+		skip := func(reason string) error {
+			imp.rowsSkipped++
+			if cfg.DebugImport {
+				log.Printf("Skipped line %d (%s, %d columns): %s", line, reason, len(record), decodeField(strings.Join(record, ";")))
+			}
+			return nil
+		}
 
 		citizenID := cfg.documentKey(field("IDENT"))
 		if citizenID == "" {
-			imp.rowsSkipped++
-			return nil
+			return skip("empty document")
 		}
 
 		var day, year string
 		if needBirthdate {
 			d, y, ok := birthdateKeys(field("FNAC"))
 			if !ok {
-				imp.rowsSkipped++
-				return nil
+				return skip("invalid birthdate")
 			}
 			if cfg.Day {
 				day = d
